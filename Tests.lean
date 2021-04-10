@@ -53,20 +53,73 @@ def defaultEnvironment : Environment := arbitrary
 
 def f {α} [Add α] (x:α) : List α := [x,x,x+x]
 
+
+set_option trace.Meta.debug true
+
+variable (x : Int)
+
 def test : MetaM Unit := do
-  -- This is quite convenient to do typeclass inference:
+  -- This does typeclass resolutions and resolves implicit parameters
+  -- The informatin about `f` will be queried from the environment. The environment
+  -- will probably be passed to the the `MetaM` monad when we call `#eval`. This also
+  -- explains why the local context is empty.
   let t <- mkAppM `f #[mkNatLit 2]
-  trace[Meta.debug]! "t: {t}"
+  let s <- getConstInfo `f
+
+  trace[Meta.debug] "t: {t}"
+  trace[Meta.debug] "s: {s.type}"
   let t <- whnf t
+  let type <- inferType t
+
+  trace[Meta.debug] "type: {type}"
+  let lc <- getLCtx
+  let mc <- getMCtx
+
+  -- Application is easy. Can we make a lambda abstraction? That would be interesting.
+  trace[Meta.debug] "lc: {lc.getFVarIds}"
 
 -- `MetaM` is probably the right API to consume in order to build custom lean objects. Moreover, it is the right context to do stuff like type inference, normal forms, etc. It seems like it is nice and logical.
 -- `TermElabM` seems to be fundamentally tied to the lean elaborator and its macro expansion mechanism, I don't want to have anything to do with that.
 
 -- Hm, can we generate structs from `MetaM`? The structs seem to be stored in the environment.
-
-set_option trace.Meta.debug true
-
 #eval test
--- #print lambdaTelescope
--- #print mkLambdaFVars
+
+#check isDefEq
+
+-- For creating lambdas these functions are crucial. They call the `MetaM` monad with
+-- the correct context!!
+-- In the `Meta/Basic.lean` file there also seem to be telescopes for let bindings.
+-- The `n` monad is a variable that is an actual `MetaM`
+-- I will probably need to look for another function for actually creating lambdas,
+-- since this one is just for traversing them.
+-- Note that this also has to update the instance cache if there are instances in the
+-- parameters of the lambda.
+#print forallTelescope
+#print lambdaTelescope
+
+#print mkLambdaFVars
+
+
+-- How to create a new free variable declaration (this intel has been extracted from
+-- the how `lambdaTelescope` works).
+-- let fvarId ← mkFreshId
+-- let lctx := lctx.mkLocalDecl fvarId name type binderInfo
+
+-- Then we can run a new `MetaM` monad in the correct context by using
+#print withReader
+
+-- I guess the only question left is how to correctly format names. The docstring of
+-- `lctx.mkLocalDecl` from the `LocalContext.lean` file says that its API is very low 
+-- level and that instead one should use `TacticM` or `TermElabM`. Since `MetaM` also
+-- has a `mkFreshId` function(implements the corresponding typeclass), it should be
+-- also safe to use `MetaM`
+
+-- But I should look at `TermElabM` at least in order to get an idea about how
+-- namespacing is supposed to work.
+#print Elab.TermElabM
+
+
+-- It seems like `CoreM` already has a `namespace` in its context. It also carries
+-- around a list of open declarations.
+
 -- #print (typeof! lambdaTelescope)

@@ -1,9 +1,15 @@
 
 namespace CNL4Lean
 
+
+-- We want the abstract grammar to be as general as Adrian's `Abstract.hs` or even
+-- more general. The reason is, that we don't want the deserialization process the option
+-- to give out errors that are not merely deserialization errors.
 inductive NonEmpty (α : Type u) where
   | singleton : α -> NonEmpty α
   | cons : α -> NonEmpty α -> NonEmpty α
+
+def NonEmpty.toArray {α : Type u} (nonempty : NonEmpty α) : Array α := sorry
 
 -- `Tokenizer.hs`
 
@@ -76,6 +82,11 @@ mutual
   -- This can be exploited to parse dependent types.
   -- Like "a function from [x:A] to [b(x):B(x)]", which can be compiled
   -- to the corresponding dependent function.
+  -- Actually, that is not true. If I define the semantics
+  -- by using 'patterns as functions', then the patterns
+  -- must add indirection, so this doesn't work. At some point we
+  -- probably want patterns(for `Expr'` and for `Fun`) that don't add indirection, so this
+  -- idea is possible.
 
   -- e.g. "A functor from $C$ to $D$."
   inductive Fun where
@@ -184,12 +195,20 @@ inductive DefnHead where
   | rel : VarSymbol -> Relator -> VarSymbol -> DefnHead
   | symbolicPredicate : SymbolicPredicate -> NonEmpty VarSymbol -> DefnHead
 
+-- All the of these newly declared variables should all have an optional type
+-- annotation!
 inductive Asm where
+  -- Can't add new variables!
   | suppose : Stmt -> Asm
+
   | letNoun : NonEmpty VarSymbol -> NounPhrase -> Asm
-  -- I probably don't want to allow this? This is an element sign
+  -- A 'let x = e in B(x)' declaration.
+  -- Map to a lean-internal let expression.
   | letIn : NonEmpty VarSymbol -> Expr' -> Asm
+  -- No typing declaration, but the type can be inferred.
+  -- Map to a lean-internal let expression.
   | letThe : VarSymbol -> Fun -> Asm
+  -- No typing declaration, but the type can be inferred.
   | letEq : VarSymbol -> Expr' -> Asm
 
 inductive Defn where
@@ -197,6 +216,9 @@ inductive Defn where
   | defnFun : List Asm -> Fun -> Option Term -> Term -> Defn
 
 structure Axiom where
+  -- Assumptions should be read sequentially in order to modify the local context
+  -- recursively in order to finally read the `stmt`. Finally the assumptions get
+  -- wrapped into a local binding.
   asms : List Asm
   stmt : Stmt
 
