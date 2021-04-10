@@ -78,6 +78,12 @@ def test : MetaM Unit := do
   -- Application is easy. Can we make a lambda abstraction? That would be interesting.
   trace[Meta.debug] "lc: {lc.getFVarIds}"
 
+  let m <- mkFreshExprMVar (mkSort levelOne)
+  let p <- mkAppM `List #[m]
+  unless (<- isDefEq p type) do throwError "unexpected"
+  -- This is legitimately cool, that this works.
+  trace[Meta.debug] "p: {p}"
+
 -- `MetaM` is probably the right API to consume in order to build custom lean objects. Moreover, it is the right context to do stuff like type inference, normal forms, etc. It seems like it is nice and logical.
 -- `TermElabM` seems to be fundamentally tied to the lean elaborator and its macro expansion mechanism, I don't want to have anything to do with that.
 

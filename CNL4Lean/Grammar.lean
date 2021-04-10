@@ -5,6 +5,10 @@ namespace CNL4Lean
 -- We want the abstract grammar to be as general as Adrian's `Abstract.hs` or even
 -- more general. The reason is, that we don't want the deserialization process the option
 -- to give out errors that are not merely deserialization errors.
+
+-- If this is ever going to be a finished product, one should also propagate position
+-- information for debugging to here.
+
 inductive NonEmpty (α : Type u) where
   | singleton : α -> NonEmpty α
   | cons : α -> NonEmpty α -> NonEmpty α
@@ -52,6 +56,8 @@ inductive Expr' where
   | int : Int -> Expr'
   -- One should maybe consider adding some better static constraints to the lenght of the list...
   | symbol : Symbol -> NonEmpty Expr' -> Expr'
+  -- I added this `app` here myself since it follows the abstract syntax tree more closely.
+  | app : Expr' -> Expr' -> Expr'
 
 -- A binary relation
 abbrev Relator := Tok
@@ -99,11 +105,13 @@ mutual
     | function : Fun -> Term -- Version with words
 end
 
-inductive FunSymb where
-  | lexicalPhrase : SgPl -> List VarSymbol -> FunSymb
-
+-- This should also be usable for making type-declaration aliases.
+-- and for other kinds of aliases.
 structure Noun where
-  -- SEM: A map `A_1 -> ... -> A_{n+1} -> Prop`, where `n` is the number of holes in the pattern.
+  -- The `lexicalPhrase` is a map `A_1 -> ... -> A_n -> B -> Prop`, where `n` is the number of holes in the pattern.
+  -- Then the semantics of the hole insert those arguments, so a noun would interpret
+  -- to a term of `B -> Prop`. The last argument will get inserted by `Stmt`.
+  
   -- That would be the variant adding indirection. If we want to avoid adding indirection:
   -- Use proposition with n+1 free variables, then substitute the arguments in directly.
 
@@ -166,8 +174,7 @@ inductive Bound where
   | Bounded
 
 mutual
-  -- SEM: Essentially it is a sigma type, only that for the sake of proof irrelevance,
-  -- we carry the 
+  -- Interprets to an expression `p` of type `?b -> Prop`.
   inductive NounPhrase where
     | nounPhrase : AdjL -> Noun -> Option VarSymbol -> AdjR -> Option Stmt -> NounPhrase
 
@@ -177,6 +184,9 @@ mutual
   inductive QuantPhrase where
     | qPhrase : Quantifier -> NounPhraseVars -> QuantPhrase
   
+  -- Interprets to an expression of type `Prop`. Note that we could technically also allow
+  -- more direct, term-based ways for constructing statements and when interpreting we could
+  -- simply tell the unifier that the type should be `Prop`.
   inductive Stmt where
     | formula : Formula -> Stmt
     | verbPhrase : Term -> VerbPhrase -> Stmt
@@ -198,20 +208,35 @@ inductive DefnHead where
 -- All the of these newly declared variables should all have an optional type
 -- annotation!
 inductive Asm where
-  -- Can't add new variables!
+  -- This doesn't add new variables, so it simply adds a proposition to the local
+  -- context. (and then is wrapped into a forall).
   | suppose : Stmt -> Asm
+  -- First add variables with unknown typing declaration `x : ?m`. Then when
+  -- interpreting the noun phrase, infer the type.
 
+  -- Note: We want to add a new section to the vocabulary about 'type aliases'. For something
+  -- like `an integer` to be directly mapped to `Int`. Then, when expanding `letNoun`, when we
+  -- encounter `$e$ an integer`, we run `isDefEqual typeOfe Int`, which should resolve
+  -- metavariables constraints. Leans powerful unification then also allows to add
+  -- where the types are only partially defined, like `List ?m`. In fact, with this trick,
+  -- we can accept typing declarations anywhere in the grammatical tree.
   | letNoun : NonEmpty VarSymbol -> NounPhrase -> Asm
-  -- A 'let x = e in B(x)' declaration.
-  -- Map to a lean-internal let expression.
+  -- A typing declaration.
   | letIn : NonEmpty VarSymbol -> Expr' -> Asm
-  -- No typing declaration, but the type can be inferred.
+  -- A 'let x := e in B(x)' declaration.
   -- Map to a lean-internal let expression.
+  -- We use this instead of using a forall with an equality axiom because in this case
+  -- we even have definitional equality.
   | letThe : VarSymbol -> Fun -> Asm
-  -- No typing declaration, but the type can be inferred.
+  -- A 'let x := e in B(x)' declaration.
+  -- Map to a lean-internal let expression.
+  -- We should consider modifying this type in the parser so that it reflects the
+  -- assumption that the left hand side is a variable.
   | letEq : VarSymbol -> Expr' -> Asm
 
 inductive Defn where
+  -- This should behave like a telescope. I need to rerun `MetaM` after unpacking each
+  -- and every assumption recursively.
   | defn : List Asm -> DefnHead -> Stmt -> Defn
   | defnFun : List Asm -> Fun -> Option Term -> Term -> Defn
 

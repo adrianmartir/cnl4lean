@@ -32,6 +32,8 @@ def interpretVar (var: VarSymbol) : Expr := match var with
 
 -- The identifier should be stored in the symbol datatype and in the vocabulary
 -- It should be possible to look up these identifiers in the environment.
+-- When building expressions, these identifiers are assumed to be in the environment.
+-- They are added to the environment by imports and definitions.
 def getSymbIdentifier (var: Symbol) : Name := sorry
 
 def getSgPlIdentifier (sgpl: SgPl) : Name := sorry
@@ -55,14 +57,22 @@ partial def interpretExpr (expr: Expr') : MetaM Expr := match expr with
 mutual
   -- Patterns add indirection.
   partial def interpretFun (fun' : Fun) : MetaM Expr := match fun' with
-    | Fun.lexicalPhrase sgpl args => do
+    | Fun.lexicalPhrase lexicalPhrase args => do
       let args <- (List.toArray args).sequenceMap interpretTerm
-      mkAppM (getSgPlIdentifier sgpl) args
+      mkAppM (getSgPlIdentifier lexicalPhrase) args
 
   partial def interpretTerm (term : Term) : MetaM Expr := match term with
     | Term.expr e => interpretExpr e
     | Term.function f => interpretFun f
 end
+
+private def interpretApp (ident: Name) (args: List Term) : MetaM (Array Expr) := do
+    (List.toArray args).sequenceMap interpretTerm
+
+-- def interpretNoun (noun: Noun) : MetaM Expr := do
+--   let args <- interpretA noun.arguments
+--   mkAppM (getSgPlIdentifier noun.lexicalPhrase) args
+
 
 def interpretAsm (asm : Asm) : MetaM Int := sorry
 -- 1) Simply add the variable to the local context (without type) (say, `x : ?m`).
