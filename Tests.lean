@@ -53,6 +53,9 @@ def defaultEnvironment : Environment := arbitrary
 
 def f {α} [Add α] (x:α) : List α := [x,x,x+x]
 
+def Foo.Bar.g := 5
+
+-- open Foo
 
 set_option trace.Meta.debug true
 
@@ -80,6 +83,14 @@ def test : MetaM Unit := do
 
   let m <- mkFreshExprMVar (mkSort levelOne)
   let p <- mkAppM `List #[m]
+  
+  -- This should probably be able to resolve `g` directly,
+  -- but for some reason it doesn't work. It's probably
+  -- because the `#check` command doesn't pass the list of
+  -- open declarations to `MetaM`
+  let t <- resolveNamespace `Foo.Bar.g
+  trace[Meta.debug] "resolved ns: {t}"
+
   unless (<- isDefEq p type) do throwError "unexpected"
   -- This is legitimately cool, that this works.
   trace[Meta.debug] "p: {p}"
@@ -124,8 +135,28 @@ def test : MetaM Unit := do
 -- namespacing is supposed to work.
 #print Elab.TermElabM
 
+-- This seems to be the root of all good things.
+-- I should understand how it works.
+#check Elab.Term.elabTerm
+
+-- Okay, I know how to find what I need now. I simply need to search for
+-- `@[builtinTermElab` in the lean 4 source code. It seems like 100% of
+-- lean Syntax is defined there. The actual `Elab.Term.elabTerm` function is irrelevant.
+-- /nix/store/rvw0b2ap6iz0x5zl6kza6ph1qczsh712-src/
+
+-- I finally struck gold!! (by searching as described above)
+-- There is a `elabFunBinders` in the `Elab/Binders.lean` file contains code that
+-- first modifies the local context to contain the free variables of the binders and then
+-- parses the body of the lambda.
+
+-- I can just simply reproduce these functions behaviour. (same with local bindings and foralls)
 
 -- It seems like `CoreM` already has a `namespace` in its context. It also carries
 -- around a list of open declarations.
+-- It implements `MonadResolveName` (in `CoreM.lean`) and Leo
+-- says it is the necessary typeclass for resolving names
+
+-- Note: `Lean/Elab/Frontend.lean` defines the standalone file elaborator!!
+-- Uhhh, how nice, there it is shown how the imports are done!
 
 -- #print (typeof! lambdaTelescope)

@@ -49,10 +49,13 @@ partial def interpretExpr (expr: Expr') : MetaM Expr := match expr with
   -- The identifiers should be queried from the pattern definition tex labels.
   -- We use `mkAppM` in order to enable stuff like typeclasses and implicit arguments
   -- (at least theoretically)
-  | Expr'.symbol symb args => do
-    let args <- (NonEmpty.toArray args).sequenceMap interpretExpr
+  | Expr'.symbol symb => do
+    -- let args <- (NonEmpty.toArray args).sequenceMap interpretExpr
     -- Patterns add indirection.
-    mkAppM (getSymbIdentifier symb) args
+    -- mkAppM (getSymbIdentifier symb) args
+    -- getSymbIdentifier symb
+    sorry
+  | Expr'.app _ _ => sorry
 
 mutual
   -- Patterns add indirection.
@@ -66,13 +69,38 @@ mutual
     | Term.function f => interpretFun f
 end
 
-private def interpretApp (ident: Name) (args: List Term) : MetaM (Array Expr) := do
-    (List.toArray args).sequenceMap interpretTerm
+private def interpretApp (ident: Name) (args: List Term) : MetaM Expr := do
+  let args <- (List.toArray args).sequenceMap interpretTerm
+  mkAppM ident args
 
--- def interpretNoun (noun: Noun) : MetaM Expr := do
---   let args <- interpretA noun.arguments
---   mkAppM (getSgPlIdentifier noun.lexicalPhrase) args
+def interpretNoun (noun: Noun Term) : MetaM Expr := 
+  interpretApp (getSgPlIdentifier noun.lexicalPhrase) noun.arguments
+  -- Maybe ensure that the result is `?m -> Prop`?
 
+def interpretAdj (adj: Adj Term) : MetaM Expr := 
+  interpretApp sorry adj.arguments
+
+def interpretVerb (verb: Verb Term) : MetaM Expr := 
+  interpretApp sorry verb.arguments
+
+def negatePredicate (pred : Expr) : Expr := sorry
+
+def interpretVerbPhrase (verbPhrase : VerbPhrase) : MetaM Expr := match verbPhrase with
+  | VerbPhrase.verb verb => interpretVerb verb
+  | VerbPhrase.adj adj => interpretAdj adj
+  | VerbPhrase.verbNot verb => do
+    let pred <- interpretVerb verb
+    negatePredicate pred
+  | VerbPhrase.adjNot adj => do
+    let pred <- interpretAdj adj
+    negatePredicate pred
+
+def interpretAdjL (adj: AdjL) : MetaM Expr :=
+  interpretAdj (Adj.mk adj.lexicalPhrase adj.arguments)
+
+def interpretAdjR (adj: AdjR) : MetaM Expr := sorry
+
+def interpretNounPhrase (nounPhrase : NounPhrase) : Int := sorry
 
 def interpretAsm (asm : Asm) : MetaM Int := sorry
 -- 1) Simply add the variable to the local context (without type) (say, `x : ?m`).

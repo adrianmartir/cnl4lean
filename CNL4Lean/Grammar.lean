@@ -55,7 +55,8 @@ inductive Expr' where
   | var : VarSymbol -> Expr'
   | int : Int -> Expr'
   -- One should maybe consider adding some better static constraints to the lenght of the list...
-  | symbol : Symbol -> NonEmpty Expr' -> Expr'
+  -- I removed the 'list of arguments' parameter from 'symbol', because it is better this way.
+  | symbol : Symbol -> Expr'
   -- I added this `app` here myself since it follows the abstract syntax tree more closely.
   | app : Expr' -> Expr' -> Expr'
 
@@ -105,9 +106,11 @@ mutual
     | function : Fun -> Term -- Version with words
 end
 
+structure lexicalPhrase where 
+
 -- This should also be usable for making type-declaration aliases.
 -- and for other kinds of aliases.
-structure Noun where
+structure Noun (α: Type u) where
   -- The `lexicalPhrase` is a map `A_1 -> ... -> A_n -> B -> Prop`, where `n` is the number of holes in the pattern.
   -- Then the semantics of the hole insert those arguments, so a noun would interpret
   -- to a term of `B -> Prop`. The last argument will get inserted by `Stmt`.
@@ -120,39 +123,28 @@ structure Noun where
   -- the proposition `prime x`. This essentially says that the semantics of `Stmt` simply
   -- are propositions in a suitable context of free variables.
   lexicalPhrase : SgPl
-  arguments : List Term
+  arguments : List α 
 
-structure NounSymb where
-  lexicalPhrase : SgPl
-  arguments : List VarSymbol
-
-structure Adj where
+structure Adj (α: Type u) where
   -- SEM: See `Noun`.
-  arguments : List Term
-
-structure AdjSymb where
   lexicalPhrase : Pattern
-  arguments : List VarSymbol
+  arguments : List α
 
-structure Verb where
+structure Verb (α : Type u) where
   -- SEM: See `Noun`.
   lexicalPhrase : SgPl
   arguments : List Term
-
-structure VerbSymb where
-  lexicalPhrase : SgPl
-  arguments : List VarSymbol
 
 inductive VerbPhrase where
-  | vPVerb : Verb -> VerbPhrase
-  | vPAdj : Adj -> VerbPhrase
-  | vPVerbNot : Verb -> VerbPhrase
-  | vPAdjNot : Adj -> VerbPhrase
+  | verb : Verb Term -> VerbPhrase
+  | adj : Adj Term -> VerbPhrase
+  | verbNot : Verb Term -> VerbPhrase
+  | adjNot : Adj Term -> VerbPhrase
 
-structure AdjL extends Adj
+structure AdjL extends Adj Term
 
 inductive AdjR where
-  | adjR : Pattern -> List Term -> AdjR
+  | adjR : Adj Term -> AdjR
   | attrRThat : VerbPhrase -> AdjR
 
 inductive Connective where
@@ -176,10 +168,10 @@ inductive Bound where
 mutual
   -- Interprets to an expression `p` of type `?b -> Prop`.
   inductive NounPhrase where
-    | nounPhrase : AdjL -> Noun -> Option VarSymbol -> AdjR -> Option Stmt -> NounPhrase
+    | nounPhrase : AdjL -> Noun Term -> Option VarSymbol -> AdjR -> Option Stmt -> NounPhrase
 
   inductive NounPhraseVars where
-    | nounPhrase : AdjL -> Noun -> List VarSymbol -> AdjR -> Option Stmt -> NounPhraseVars
+    | nounPhrase : AdjL -> Noun Term -> List VarSymbol -> AdjR -> Option Stmt -> NounPhraseVars
   
   inductive QuantPhrase where
     | qPhrase : Quantifier -> NounPhraseVars -> QuantPhrase
@@ -199,9 +191,9 @@ mutual
 end
 
 inductive DefnHead where
-  | adj : Option NounPhrase -> VarSymbol -> AdjSymb -> DefnHead
-  | verb : Option NounPhrase -> VarSymbol -> VerbSymb -> DefnHead
-  | noun : VarSymbol -> NounSymb -> DefnHead
+  | adj : Option NounPhrase -> VarSymbol -> Adj VarSymbol -> DefnHead
+  | verb : Option NounPhrase -> VarSymbol -> Verb VarSymbol -> DefnHead
+  | noun : VarSymbol -> Noun VarSymbol-> DefnHead
   | rel : VarSymbol -> Relator -> VarSymbol -> DefnHead
   | symbolicPredicate : SymbolicPredicate -> NonEmpty VarSymbol -> DefnHead
 
