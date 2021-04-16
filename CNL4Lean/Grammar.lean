@@ -13,7 +13,7 @@ inductive NonEmpty (α : Type u) where
   | singleton : α -> NonEmpty α
   | cons : α -> NonEmpty α -> NonEmpty α
 
-def NonEmpty.toArray {α : Type u} (nonempty : NonEmpty α) : Array α := sorry
+-- def NonEmpty.toArray {α : Type u} (nonempty : NonEmpty α) : Array α := sorry
 
 -- `Tokenizer.hs`
 
@@ -43,20 +43,25 @@ inductive VarSymbol where
 
 -- `Abstract.hs`
 
+-- This should simply be used to incorporate some assumption about the identifier being well-formed
+structure Ident where
+  ident : String
+
 -- It seems quite stupid to propagate this information to this lean backend, but I guess I should keep this information for consistency sake and in case I want to let lean output sophisticated error messages.
 
 inductive Symbol where
   -- This constructor is extremely odd. It is used to encode function application. I feel like function application should be
   -- a primitive in `Expr'`. Just like one might add lambda abstraction as a primitive in `Expr'` and also dependent functions.
   | const : Tok -> Symbol
-  | mixfix : Pattern -> Symbol
+  | mixfix : Ident -> Pattern -> Symbol
 
 inductive Expr' where
   | var : VarSymbol -> Expr'
   | int : Int -> Expr'
   -- One should maybe consider adding some better static constraints to the lenght of the list...
   -- I removed the 'list of arguments' parameter from 'symbol', because it is better this way.
-  | symbol : Symbol -> Expr'
+  -- | const : Tok -> Expr'
+  | symbol : Symbol -> List Expr' -> Expr'
   -- I added this `app` here myself since it follows the abstract syntax tree more closely.
   | app : Expr' -> Expr' -> Expr'
 
@@ -97,7 +102,7 @@ mutual
 
   -- e.g. "A functor from $C$ to $D$."
   inductive Fun where
-    | lexicalPhrase : SgPl -> List Term -> Fun
+    | lexicalPhrase : Ident -> SgPl -> List Term -> Fun
 
   -- Note: This does not allow putting functional nouns inside symbolic
   -- expressions
@@ -122,16 +127,20 @@ structure Noun (α: Type u) where
   -- `prime : Nat -> Prop` in order to compile the phrase to specify `x:Nat` and get
   -- the proposition `prime x`. This essentially says that the semantics of `Stmt` simply
   -- are propositions in a suitable context of free variables.
+  ident : Ident
+  -- The identifier is for the purposes of refering to this construct from lean.
   lexicalPhrase : SgPl
   arguments : List α 
 
 structure Adj (α: Type u) where
   -- SEM: See `Noun`.
+  ident : Ident
   lexicalPhrase : Pattern
   arguments : List α
 
 structure Verb (α : Type u) where
   -- SEM: See `Noun`.
+  ident : Ident
   lexicalPhrase : SgPl
   arguments : List Term
 

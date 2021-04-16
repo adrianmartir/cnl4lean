@@ -155,6 +155,7 @@ def test : MetaM Unit := do
 -- around a list of open declarations.
 -- It implements `MonadResolveName` (in `CoreM.lean`) and Leo
 -- says it is the necessary typeclass for resolving names
+-- I want to actually test this somehow.
 
 -- Note: `Lean/Elab/Frontend.lean` defines the standalone file elaborator!!
 -- Uhhh, how nice, there it is shown how the imports are done!

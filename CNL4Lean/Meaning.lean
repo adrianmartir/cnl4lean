@@ -34,9 +34,9 @@ def interpretVar (var: VarSymbol) : Expr := match var with
 -- It should be possible to look up these identifiers in the environment.
 -- When building expressions, these identifiers are assumed to be in the environment.
 -- They are added to the environment by imports and definitions.
-def getSymbIdentifier (var: Symbol) : Name := sorry
+def Ident.toName (ident : Ident) : Name := sorry
 
-def getSgPlIdentifier (sgpl: SgPl) : Name := sorry
+def Tok.toName (tok : Tok) : Name := sorry
 
 -- Does the have to get registered at some point? Yes. They are expected to be in the
 -- local context from which the `MetaM` monad has been invoked. For instance, we may
@@ -49,20 +49,20 @@ partial def interpretExpr (expr: Expr') : MetaM Expr := match expr with
   -- The identifiers should be queried from the pattern definition tex labels.
   -- We use `mkAppM` in order to enable stuff like typeclasses and implicit arguments
   -- (at least theoretically)
-  | Expr'.symbol symb => do
-    -- let args <- (NonEmpty.toArray args).sequenceMap interpretExpr
+  | Expr'.symbol symb args => do
+    let args <- (NonEmpty.toArray args).sequenceMap interpretExpr
     -- Patterns add indirection.
-    -- mkAppM (getSymbIdentifier symb) args
-    -- getSymbIdentifier symb
-    sorry
-  | Expr'.app _ _ => sorry
+    match symb with
+      | Symbol.const t => mkAppM (Tok.toName t) args
+      | Symbol.mixfix ident _ => mkAppM (Ident.toName ident) args
+  | _ => sorry
 
 mutual
   -- Patterns add indirection.
   partial def interpretFun (fun' : Fun) : MetaM Expr := match fun' with
-    | Fun.lexicalPhrase lexicalPhrase args => do
+    | Fun.lexicalPhrase ident lexicalPhrase args => do
       let args <- (List.toArray args).sequenceMap interpretTerm
-      mkAppM (getSgPlIdentifier lexicalPhrase) args
+      mkAppM (Ident.toName ident) args
 
   partial def interpretTerm (term : Term) : MetaM Expr := match term with
     | Term.expr e => interpretExpr e
@@ -74,14 +74,14 @@ private def interpretApp (ident: Name) (args: List Term) : MetaM Expr := do
   mkAppM ident args
 
 def interpretNoun (noun: Noun Term) : MetaM Expr := 
-  interpretApp (getSgPlIdentifier noun.lexicalPhrase) noun.arguments
+  interpretApp (Ident.toName noun.ident) noun.arguments
   -- Maybe ensure that the result is `?m -> Prop`?
 
 def interpretAdj (adj: Adj Term) : MetaM Expr := 
-  interpretApp sorry adj.arguments
+  interpretApp (Ident.toName adj.ident) adj.arguments
 
 def interpretVerb (verb: Verb Term) : MetaM Expr := 
-  interpretApp sorry verb.arguments
+  interpretApp (Ident.toName verb.ident) verb.arguments
 
 def negatePredicate (pred : Expr) : Expr := sorry
 
@@ -96,11 +96,19 @@ def interpretVerbPhrase (verbPhrase : VerbPhrase) : MetaM Expr := match verbPhra
     negatePredicate pred
 
 def interpretAdjL (adj: AdjL) : MetaM Expr :=
-  interpretAdj (Adj.mk adj.lexicalPhrase adj.arguments)
+  interpretAdj (Adj.mk adj.ident adj.lexicalPhrase adj.arguments)
 
-def interpretAdjR (adj: AdjR) : MetaM Expr := sorry
+def interpretAdjR (adj: AdjR) : MetaM Expr := match adj with
+  | AdjR.adjR adj => interpretAdj adj
+  | AdjR.attrRThat verbPhrase => interpretVerbPhrase verbPhrase
 
-def interpretNounPhrase (nounPhrase : NounPhrase) : Int := sorry
+def interpretNounPhrase (nounPhrase : NounPhrase) : MetaM Expr := match nounPhrase with
+  | NounPhrase.nounPhrase adjL noun varSymb? adjR stmt? => sorry -- This should be an `and`
+
+def interpretNounPhraseVars (nounPhrase : NounPhraseVars) : MetaM Expr := match nounPhrase with
+  | NounPhraseVars.nounPhrase adjL noun varSymbs adjR stmt? => sorry -- This should be an `and`
+
+
 
 def interpretAsm (asm : Asm) : MetaM Int := sorry
 -- 1) Simply add the variable to the local context (without type) (say, `x : ?m`).
