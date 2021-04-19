@@ -9,12 +9,6 @@ namespace CNL4Lean
 -- If this is ever going to be a finished product, one should also propagate position
 -- information for debugging to here.
 
-inductive NonEmpty (α : Type u) where
-  | singleton : α -> NonEmpty α
-  | cons : α -> NonEmpty α -> NonEmpty α
-
--- def NonEmpty.toArray {α : Type u} (nonempty : NonEmpty α) : Array α := sorry
-
 -- `Tokenizer.hs`
 
 inductive Delim where
@@ -35,25 +29,15 @@ inductive Tok where
 
 abbrev Pattern := List (Option Tok)
 
+
 -- `Variable.hs`
 
 inductive VarSymbol where
   | namedVar : String -> VarSymbol
   | freshVar : Int -> VarSymbol
 
+
 -- `Abstract.hs`
-
--- This should simply be used to incorporate some assumption about the identifier being well-formed
-structure Ident where
-  ident : String
-
--- It seems quite stupid to propagate this information to this lean backend, but I guess I should keep this information for consistency sake and in case I want to let lean output sophisticated error messages.
-
-inductive Symbol where
-  -- This constructor is extremely odd. It is used to encode function application. I feel like function application should be
-  -- a primitive in `Expr'`. Just like one might add lambda abstraction as a primitive in `Expr'` and also dependent functions.
-  | const : Tok -> Symbol
-  | mixfix : Ident -> Pattern -> Symbol
 
 inductive Expr' where
   | var : VarSymbol -> Expr'
@@ -61,7 +45,7 @@ inductive Expr' where
   -- One should maybe consider adding some better static constraints to the lenght of the list...
   -- I removed the 'list of arguments' parameter from 'symbol', because it is better this way.
   -- | const : Tok -> Expr'
-  | symbol : Symbol -> List Expr' -> Expr'
+  | symbol : Pattern -> List Expr' -> Expr'
   -- I added this `app` here myself since it follows the abstract syntax tree more closely.
   | app : Expr' -> Expr' -> Expr'
 
@@ -74,16 +58,16 @@ inductive Sign where
 
 inductive Chain where
   -- This is simply one relation symbol applied to a bunch of expressions
-  | chainBase : NonEmpty Expr' -> Sign -> Relator -> NonEmpty Expr' -> Chain
+  | chainBase : List Expr' -> Sign -> Relator -> List Expr' -> Chain
   -- We can also chain relations:
-  | chainCons : NonEmpty Expr' -> Sign -> Relator -> Chain -> Chain
+  | chainCons : List Expr' -> Sign -> Relator -> Chain -> Chain
 
 inductive SymbolicPredicate where
   | symbolicPredicate : String -> Int -> SymbolicPredicate
 
 inductive Formula where
   | chain : Chain -> Formula
-  | predicate : SymbolicPredicate -> NonEmpty Expr' -> Formula
+  | predicate : SymbolicPredicate -> List Expr' -> Formula
 
 
 structure SgPl where
@@ -102,7 +86,7 @@ mutual
 
   -- e.g. "A functor from $C$ to $D$."
   inductive Fun where
-    | lexicalPhrase : Ident -> SgPl -> List Term -> Fun
+    | lexicalPhrase : SgPl -> List Term -> Fun
 
   -- Note: This does not allow putting functional nouns inside symbolic
   -- expressions
@@ -115,7 +99,8 @@ structure lexicalPhrase where
 
 -- This should also be usable for making type-declaration aliases.
 -- and for other kinds of aliases.
-structure Noun (α: Type u) where
+inductive Noun (α: Type u) where
+  | noun : SgPl -> List α -> Noun α
   -- The `lexicalPhrase` is a map `A_1 -> ... -> A_n -> B -> Prop`, where `n` is the number of holes in the pattern.
   -- Then the semantics of the hole insert those arguments, so a noun would interpret
   -- to a term of `B -> Prop`. The last argument will get inserted by `Stmt`.
@@ -127,22 +112,15 @@ structure Noun (α: Type u) where
   -- `prime : Nat -> Prop` in order to compile the phrase to specify `x:Nat` and get
   -- the proposition `prime x`. This essentially says that the semantics of `Stmt` simply
   -- are propositions in a suitable context of free variables.
-  ident : Ident
   -- The identifier is for the purposes of refering to this construct from lean.
-  lexicalPhrase : SgPl
-  arguments : List α 
 
-structure Adj (α: Type u) where
+inductive Adj (α: Type u) where
   -- SEM: See `Noun`.
-  ident : Ident
-  lexicalPhrase : Pattern
-  arguments : List α
+  | adj : Pattern -> List α -> Adj α
 
-structure Verb (α : Type u) where
+inductive Verb (α : Type u) where
   -- SEM: See `Noun`.
-  ident : Ident
-  lexicalPhrase : SgPl
-  arguments : List Term
+  | verb : SgPl ->  List Term -> Verb α
 
 inductive VerbPhrase where
   | verb : Verb Term -> VerbPhrase
@@ -150,7 +128,8 @@ inductive VerbPhrase where
   | verbNot : Verb Term -> VerbPhrase
   | adjNot : Adj Term -> VerbPhrase
 
-structure AdjL extends Adj Term
+inductive AdjL where
+  | adjL : Pattern -> List Term -> AdjL
 
 inductive AdjR where
   | adjR : Adj Term -> AdjR
@@ -196,7 +175,7 @@ mutual
     | exists' : NounPhraseVars -> Stmt
     | connected : Connective -> Stmt -> Stmt -> Stmt
     | quantPhrase : QuantPhrase -> Stmt -> Stmt
-    | symbolicQuantified : QuantPhrase -> NonEmpty VarSymbol -> Bound -> Option Stmt -> Stmt
+    | symbolicQuantified : QuantPhrase -> List VarSymbol -> Bound -> Option Stmt -> Stmt
 end
 
 inductive DefnHead where
@@ -204,7 +183,7 @@ inductive DefnHead where
   | verb : Option NounPhrase -> VarSymbol -> Verb VarSymbol -> DefnHead
   | noun : VarSymbol -> Noun VarSymbol-> DefnHead
   | rel : VarSymbol -> Relator -> VarSymbol -> DefnHead
-  | symbolicPredicate : SymbolicPredicate -> NonEmpty VarSymbol -> DefnHead
+  | symbolicPredicate : SymbolicPredicate -> List VarSymbol -> DefnHead
 
 -- All the of these newly declared variables should all have an optional type
 -- annotation!
@@ -221,9 +200,9 @@ inductive Asm where
   -- metavariables constraints. Leans powerful unification then also allows to add
   -- where the types are only partially defined, like `List ?m`. In fact, with this trick,
   -- we can accept typing declarations anywhere in the grammatical tree.
-  | letNoun : NonEmpty VarSymbol -> NounPhrase -> Asm
+  | letNoun : List VarSymbol -> NounPhrase -> Asm
   -- A typing declaration.
-  | letIn : NonEmpty VarSymbol -> Expr' -> Asm
+  | letIn : List VarSymbol -> Expr' -> Asm
   -- A 'let x := e in B(x)' declaration.
   -- Map to a lean-internal let expression.
   -- We use this instead of using a forall with an equality axiom because in this case
