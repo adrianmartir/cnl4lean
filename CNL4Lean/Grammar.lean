@@ -60,7 +60,7 @@ inductive Chain where
   | chainCons : Array Expr' -> Sign -> Relator -> Chain -> Chain
 
 inductive SymbolicPredicate where
-  | symbolicPredicate : String -> Int -> SymbolicPredicate
+  | mk : String -> Int -> SymbolicPredicate
 
 inductive Formula where
   | chain : Chain -> Formula
@@ -83,7 +83,7 @@ mutual
 
   -- e.g. "A functor from $C$ to $D$."
   inductive Fun where
-    | lexicalPhrase : SgPl -> Array Term -> Fun
+    | mk : SgPl -> Array Term -> Fun
 
   -- Note: This does not allow putting functional nouns inside symbolic
   -- expressions
@@ -92,12 +92,10 @@ mutual
     | function : Fun -> Term -- Version with words
 end
 
-structure lexicalPhrase where 
-
 -- This should also be usable for making type-declaration aliases.
 -- and for other kinds of aliases.
 inductive Noun (α: Type u) where
-  | noun : SgPl -> Array α -> Noun α
+  | mk : SgPl -> Array α -> Noun α
   -- The `lexicalPhrase` is a map `A_1 -> ... -> A_n -> B -> Prop`, where `n` is the number of holes in the pattern.
   -- Then the semantics of the hole insert those arguments, so a noun would interpret
   -- to a term of `B -> Prop`. The last argument will get inserted by `Stmt`.
@@ -113,12 +111,13 @@ inductive Noun (α: Type u) where
 
 inductive Adj (α: Type u) where
   -- SEM: See `Noun`.
-  | adj : Pattern -> Array α -> Adj α
+  | mk : Pattern -> Array α -> Adj α
 
 inductive Verb (α : Type u) where
   -- SEM: See `Noun`.
-  | verb : SgPl ->  Array Term -> Verb α
+  | mk : SgPl ->  Array Term -> Verb α
 
+-- We should use `Sign` here
 inductive VerbPhrase where
   | verb : Verb Term -> VerbPhrase
   | adj : Adj Term -> VerbPhrase
@@ -126,10 +125,10 @@ inductive VerbPhrase where
   | adjNot : Adj Term -> VerbPhrase
 
 inductive AdjL where
-  | adjL : Pattern -> Array Term -> AdjL
+  | mk : Pattern -> Array Term -> AdjL
 
 inductive AdjR where
-  | adjR : Adj Term -> AdjR
+  | adjR : Pattern -> Array Term -> AdjR
   | attrRThat : VerbPhrase -> AdjR
 
 inductive Connective where
@@ -147,19 +146,19 @@ inductive Quantifier where
 
 -- We probably won't need this.
 inductive Bound where
-  | Unbounded
-  | Bounded
+  | unbounded
+  | bounded : Sign -> Relator -> Expr' -> Bound
 
 mutual
   -- Interprets to an expression `p` of type `?b -> Prop`.
   inductive NounPhrase where
-    | nounPhrase : AdjL -> Noun Term -> Option VarSymbol -> AdjR -> Option Stmt -> NounPhrase
+    | mk : AdjL -> Noun Term -> Option VarSymbol -> AdjR -> Option Stmt -> NounPhrase
 
   inductive NounPhraseVars where
-    | nounPhrase : AdjL -> Noun Term -> Array VarSymbol -> AdjR -> Option Stmt -> NounPhraseVars
+    | mk : AdjL -> Noun Term -> Array VarSymbol -> AdjR -> Option Stmt -> NounPhraseVars
   
   inductive QuantPhrase where
-    | qPhrase : Quantifier -> NounPhraseVars -> QuantPhrase
+    | mk : Quantifier -> NounPhraseVars -> QuantPhrase
   
   -- Interprets to an expression of type `Prop`. Note that we could technically also allow
   -- more direct, term-based ways for constructing statements and when interpreting we could
