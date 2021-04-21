@@ -72,11 +72,14 @@ private instance : Monad Option where
     | some t => f t
 
 
-def getInductive? (json : Json) : Option (String × Json) := do
+private def getInductive'? (json : Json) : Option (String × Json) := do
   let tag <- json.getObjVal? "tag"
   let tag <- tag.getStr?
-  (tag, json.getObjValD "contents")
+  let contents <- json.getObjVal? "contents"
+  (tag, contents)
 
+-- If getInductive'? is none and the json is a string, return (theString, Json.null)!!!!
+-- def getInductive? (json : Json) : Option (String × Json) := (getInductive'? json).getD
 
 instance : Deserializable Delim m where
   deserialize
