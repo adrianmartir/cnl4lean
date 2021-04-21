@@ -27,7 +27,7 @@ inductive Tok where
   | openT : Delim -> Tok
   | close : Delim -> Tok
 
-abbrev Pattern := List (Option Tok)
+abbrev Pattern := Array (Option Tok)
 
 
 -- `Variable.hs`
@@ -42,11 +42,8 @@ inductive VarSymbol where
 inductive Expr' where
   | var : VarSymbol -> Expr'
   | int : Int -> Expr'
-  -- One should maybe consider adding some better static constraints to the lenght of the list...
-  -- I removed the 'list of arguments' parameter from 'symbol', because it is better this way.
-  -- | const : Tok -> Expr'
-  | symbol : Pattern -> List Expr' -> Expr'
-  -- I added this `app` here myself since it follows the abstract syntax tree more closely.
+  | const : Tok -> Expr'
+  | mixfix : Pattern -> Array Expr' -> Expr'
   | app : Expr' -> Expr' -> Expr'
 
 -- A binary relation
@@ -58,16 +55,16 @@ inductive Sign where
 
 inductive Chain where
   -- This is simply one relation symbol applied to a bunch of expressions
-  | chainBase : List Expr' -> Sign -> Relator -> List Expr' -> Chain
+  | chainBase : Array Expr' -> Sign -> Relator -> Array Expr' -> Chain
   -- We can also chain relations:
-  | chainCons : List Expr' -> Sign -> Relator -> Chain -> Chain
+  | chainCons : Array Expr' -> Sign -> Relator -> Chain -> Chain
 
 inductive SymbolicPredicate where
   | symbolicPredicate : String -> Int -> SymbolicPredicate
 
 inductive Formula where
   | chain : Chain -> Formula
-  | predicate : SymbolicPredicate -> List Expr' -> Formula
+  | predicate : SymbolicPredicate -> Array Expr' -> Formula
 
 
 structure SgPl where
@@ -86,7 +83,7 @@ mutual
 
   -- e.g. "A functor from $C$ to $D$."
   inductive Fun where
-    | lexicalPhrase : SgPl -> List Term -> Fun
+    | lexicalPhrase : SgPl -> Array Term -> Fun
 
   -- Note: This does not allow putting functional nouns inside symbolic
   -- expressions
@@ -100,7 +97,7 @@ structure lexicalPhrase where
 -- This should also be usable for making type-declaration aliases.
 -- and for other kinds of aliases.
 inductive Noun (α: Type u) where
-  | noun : SgPl -> List α -> Noun α
+  | noun : SgPl -> Array α -> Noun α
   -- The `lexicalPhrase` is a map `A_1 -> ... -> A_n -> B -> Prop`, where `n` is the number of holes in the pattern.
   -- Then the semantics of the hole insert those arguments, so a noun would interpret
   -- to a term of `B -> Prop`. The last argument will get inserted by `Stmt`.
@@ -116,11 +113,11 @@ inductive Noun (α: Type u) where
 
 inductive Adj (α: Type u) where
   -- SEM: See `Noun`.
-  | adj : Pattern -> List α -> Adj α
+  | adj : Pattern -> Array α -> Adj α
 
 inductive Verb (α : Type u) where
   -- SEM: See `Noun`.
-  | verb : SgPl ->  List Term -> Verb α
+  | verb : SgPl ->  Array Term -> Verb α
 
 inductive VerbPhrase where
   | verb : Verb Term -> VerbPhrase
@@ -129,7 +126,7 @@ inductive VerbPhrase where
   | adjNot : Adj Term -> VerbPhrase
 
 inductive AdjL where
-  | adjL : Pattern -> List Term -> AdjL
+  | adjL : Pattern -> Array Term -> AdjL
 
 inductive AdjR where
   | adjR : Adj Term -> AdjR
@@ -159,7 +156,7 @@ mutual
     | nounPhrase : AdjL -> Noun Term -> Option VarSymbol -> AdjR -> Option Stmt -> NounPhrase
 
   inductive NounPhraseVars where
-    | nounPhrase : AdjL -> Noun Term -> List VarSymbol -> AdjR -> Option Stmt -> NounPhraseVars
+    | nounPhrase : AdjL -> Noun Term -> Array VarSymbol -> AdjR -> Option Stmt -> NounPhraseVars
   
   inductive QuantPhrase where
     | qPhrase : Quantifier -> NounPhraseVars -> QuantPhrase
@@ -175,7 +172,7 @@ mutual
     | exists' : NounPhraseVars -> Stmt
     | connected : Connective -> Stmt -> Stmt -> Stmt
     | quantPhrase : QuantPhrase -> Stmt -> Stmt
-    | symbolicQuantified : QuantPhrase -> List VarSymbol -> Bound -> Option Stmt -> Stmt
+    | symbolicQuantified : QuantPhrase -> Array VarSymbol -> Bound -> Option Stmt -> Stmt
 end
 
 inductive DefnHead where
@@ -183,7 +180,7 @@ inductive DefnHead where
   | verb : Option NounPhrase -> VarSymbol -> Verb VarSymbol -> DefnHead
   | noun : VarSymbol -> Noun VarSymbol-> DefnHead
   | rel : VarSymbol -> Relator -> VarSymbol -> DefnHead
-  | symbolicPredicate : SymbolicPredicate -> List VarSymbol -> DefnHead
+  | symbolicPredicate : SymbolicPredicate -> Array VarSymbol -> DefnHead
 
 -- All the of these newly declared variables should all have an optional type
 -- annotation!
@@ -198,11 +195,11 @@ inductive Asm where
   -- like `an integer` to be directly mapped to `Int`. Then, when expanding `letNoun`, when we
   -- encounter `$e$ an integer`, we run `isDefEqual typeOfe Int`, which should resolve
   -- metavariables constraints. Leans powerful unification then also allows to add
-  -- where the types are only partially defined, like `List ?m`. In fact, with this trick,
+  -- where the types are only partially defined, like `Array ?m`. In fact, with this trick,
   -- we can accept typing declarations anywhere in the grammatical tree.
-  | letNoun : List VarSymbol -> NounPhrase -> Asm
+  | letNoun : Array VarSymbol -> NounPhrase -> Asm
   -- A typing declaration.
-  | letIn : List VarSymbol -> Expr' -> Asm
+  | letIn : Array VarSymbol -> Expr' -> Asm
   -- A 'let x := e in B(x)' declaration.
   -- Map to a lean-internal let expression.
   -- We use this instead of using a forall with an equality axiom because in this case
@@ -217,21 +214,21 @@ inductive Asm where
 inductive Defn where
   -- This should behave like a telescope. I need to rerun `MetaM` after unpacking each
   -- and every assumption recursively.
-  | defn : List Asm -> DefnHead -> Stmt -> Defn
-  | defnFun : List Asm -> Fun -> Option Term -> Term -> Defn
+  | defn : Array Asm -> DefnHead -> Stmt -> Defn
+  | defnFun : Array Asm -> Fun -> Option Term -> Term -> Defn
 
 structure Axiom where
   -- Assumptions should be read sequentially in order to modify the local context
   -- recursively in order to finally read the `stmt`. Finally the assumptions get
   -- wrapped into a local binding.
-  asms : List Asm
+  asms : Array Asm
   stmt : Stmt
 
 structure Lemma where
-  asms : List Asm
+  asms : Array Asm
   stmt : Stmt
 
-abbrev Tag := Option (List Tok)
+abbrev Tag := Option (Array Tok)
 
 inductive Para where
   | defnP : Defn -> Para
