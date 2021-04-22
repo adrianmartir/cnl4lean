@@ -20,11 +20,11 @@ inductive Delim where
 -- This doesn't include all tokens, since some kinds are not allowed in `Adapt.hs`
 inductive Tok where
   | word : String -> Tok
-  | variableT : String -> Tok
+  | variable' : String -> Tok
   | symbol : String -> Tok
   | integer : Int -> Tok
   | command : String -> Tok
-  | openT : Delim -> Tok
+  | open' : Delim -> Tok
   | close : Delim -> Tok
 
 abbrev Pattern := Array (Option Tok)
@@ -167,11 +167,11 @@ mutual
     | formula : Formula -> Stmt
     | verbPhrase : Term -> VerbPhrase -> Stmt
     | noun : Term -> NounPhrase -> Stmt
-    | neg : Stmt
+    | neg : Stmt -> Stmt
     | exists' : NounPhraseVars -> Stmt
     | connected : Connective -> Stmt -> Stmt -> Stmt
     | quantPhrase : QuantPhrase -> Stmt -> Stmt
-    | symbolicQuantified : QuantPhrase -> Array VarSymbol -> Bound -> Option Stmt -> Stmt
+    | symbolicQuantified : QuantPhrase -> Array VarSymbol -> Bound -> Option Stmt -> Stmt -> Stmt
 end
 
 inductive DefnHead where
@@ -214,22 +214,20 @@ inductive Defn where
   -- This should behave like a telescope. I need to rerun `MetaM` after unpacking each
   -- and every assumption recursively.
   | defn : Array Asm -> DefnHead -> Stmt -> Defn
-  | defnFun : Array Asm -> Fun -> Option Term -> Term -> Defn
+  | fun' : Array Asm -> Fun -> Option Term -> Term -> Defn
 
-structure Axiom where
+inductive Axiom where
   -- Assumptions should be read sequentially in order to modify the local context
   -- recursively in order to finally read the `stmt`. Finally the assumptions get
   -- wrapped into a local binding.
-  asms : Array Asm
-  stmt : Stmt
+  | mk: Array Asm -> Stmt -> Axiom
 
-structure Lemma where
-  asms : Array Asm
-  stmt : Stmt
+inductive Lemma where
+  | mk: Array Asm -> Stmt -> Lemma
 
 abbrev Tag := Option (Array Tok)
 
 inductive Para where
-  | defnP : Defn -> Para
-  | axiomP : Tag -> Axiom -> Para
-  | lemmaP : Tag -> Lemma -> Para
+  | defn' : Defn -> Para
+  -- | axiomP : Tag -> Axiom -> Para
+  | lemma' : Tag -> Lemma -> Para

@@ -9,7 +9,7 @@ open Deserializable
 open DeserializationError
 
 -- At some point later, in the CLI interface or sth:
-def file [Monad m] [MonadLiftT IO m] : m String := IO.FS.readFile "chain.json"
+def file [Monad m] [MonadLiftT IO m] : m String := IO.FS.readFile "paraDefn.json"
 
 def json : DeserializeM Json := do
   let contents <- file
@@ -20,11 +20,11 @@ def json : DeserializeM Json := do
 
 
 -- This takes way to long to process..
-def getChain : DeserializeM Chain := json >>= deserialize
+def getPara : DeserializeM Para := json >>= deserialize
 -- This should simply be lowered to IO and then run.
 
 def f : IO DeserializationError := do
-  let chain <- getChain.run
+  let chain <- getPara.run
   match chain with
     | Except.ok c => panic! "oh yes"
     | Except.error e => e

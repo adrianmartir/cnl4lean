@@ -71,15 +71,20 @@ private instance : Monad Option where
     | none => none
     | some t => f t
 
+/- Gets an inductive type constructor name and its arguments in Json format.
+For zero arguments, we return `Json.null`
+For one argument we return the json value of the argument,
+and for multiple arguments, we return a json array of json values -/
+def getInductive? (json : Json) : Option (String × Json) := match json with
+  | Json.str s => some (s, Json.null)
+  | json => getInductiveArgs? json
+where
+  getInductiveArgs? (json : Json) : Option (String × Json) := do
+    let tag <- json.getObjVal? "tag"
+    let tag <- tag.getStr?
+    let contents <- json.getObjVal? "contents"
+    (tag, contents)
 
-private def getInductive'? (json : Json) : Option (String × Json) := do
-  let tag <- json.getObjVal? "tag"
-  let tag <- tag.getStr?
-  let contents <- json.getObjVal? "contents"
-  (tag, contents)
-
--- If getInductive'? is none and the json is a string, return (theString, Json.null)!!!!
--- def getInductive? (json : Json) : Option (String × Json) := (getInductive'? json).getD
 
 instance : Deserializable Delim m where
   deserialize
@@ -93,11 +98,11 @@ instance : Deserializable Delim m where
 instance : Deserializable Tok m where
   deserialize json := match getInductive? json with
     | some ("Word", Json.str t) => Tok.word t
-    | some ("Variable", Json.str t) => Tok.variableT t
+    | some ("Variable", Json.str t) => Tok.variable' t
     | some ("Symbol", Json.str t) => Tok.symbol t
     | some ("Integer", (n: Int)) => Tok.integer n
     | some ("Command", Json.str t) => Tok.command t
-    | some ("Open", t) => Tok.openT <$> deserialize t
+    | some ("Open", t) => Tok.open' <$> deserialize t
     | some ("Close", t) => Tok.close <$> deserialize t
     | _ => throwUnexpected "token" json
 
@@ -208,12 +213,13 @@ instance [Deserializable α m]: Deserializable (Verb α) m where
       Verb.mk <$> deserialize sgPl <*> args.mapM deserialize
     | json => throwUnexpected "verb" json
 
--- instance Deserializable VerbPhrase m where
---   deserialize (json: Json) : m VerbPhrase := match getInductive? json with
---     | some ("VPVerb", t) => VerbPhrase.verb <$> deserialize t
---     | some ("VPAdj", t) => VerbPhrase.adj <$> deserialize t
---     | some ("VPVerbNot")
---     | _ => throwUnexpected "verb phrase" json
+instance : Deserializable VerbPhrase m where
+  deserialize (json: Json) : m VerbPhrase := match getInductive? json with
+    | some ("VPVerb", t) => VerbPhrase.verb <$> deserialize t
+    | some ("VPAdj", t) => VerbPhrase.adj <$> deserialize t
+    | some ("VPVerbNot", t) => VerbPhrase.verbNot <$> deserialize t
+    | some ("VPAdjNot", t) => VerbPhrase.adjNot <$> deserialize t
+    | _ => throwUnexpected "verb phrase" json
 
 instance : Deserializable AdjL m where
   deserialize
@@ -278,12 +284,115 @@ mutual
 
   private partial def deserializeStmt (json: Json) : m Stmt := match getInductive? json with
     | some ("StmtFormula", t) => Stmt.formula <$> deserialize t
-    | some ("StmtVerbPhrase", Json.arr #[term, verbPhrase]) => Stmt.formula
+    | some ("StmtVerbPhrase", Json.arr #[term, verbPhrase]) => Stmt.verbPhrase
         <$> deserialize term
         <*> deserialize verbPhrase
-    | _ => throwUnexpected "statment" json
-    
+    | some ("StmtNoun", Json.arr #[term, np]) => Stmt.noun
+        <$> deserialize term
+        <*> deserializeNP np
+    | some ("StmtNeg", t) => Stmt.neg <$> deserializeStmt t
+    | some ("StmtExists", t) => Stmt.exists' <$> deserializeNPVars t
+    | some ("StmtConnected", Json.arr #[con, stmt, stmt']) => Stmt.connected
+        <$> deserialize con
+        <*> deserializeStmt stmt
+        <*> deserializeStmt stmt'
+    | some ("StmtQuantPhrase", Json.arr #[qPhrase, stmt]) => Stmt.quantPhrase
+        <$> deserializeQPhrase qPhrase
+        <*> deserializeStmt stmt
+    | some ("SymbolicQuantified", Json.arr #[qPhrase, varSymbs, bound, suchThat, stmt]) => Stmt.symbolicQuantified
+        <$> deserializeQPhrase qPhrase
+        <*> deserialize varSymbs
+        <*> deserialize bound
+        <*> deserializeStmt suchThat
+        <*> deserializeStmt stmt
+    | _ => throwUnexpected "statement" json
 end
+
+instance : Deserializable NounPhrase m where
+  deserialize := deserializeNP
+
+instance : Deserializable NounPhraseVars m where
+  deserialize := deserializeNPVars
+
+instance : Deserializable QuantPhrase m where
+  deserialize := deserializeQPhrase
+
+instance : Deserializable Stmt m where
+  deserialize := deserializeStmt
+
+instance : Deserializable DefnHead m where
+  deserialize json := match getInductive? json with
+    | some ("DefnAdj", Json.arr #[np, varSymb, adj]) => DefnHead.adj
+        <$> deserialize np
+        <*> deserialize varSymb
+        <*> deserialize adj
+    | some ("DefnVerb", Json.arr #[np, varSymb, verb]) => DefnHead.verb
+        <$> deserialize np
+        <*> deserialize varSymb
+        <*> deserialize verb
+    | some ("DefnNoun", Json.arr #[varSymb, noun]) => DefnHead.noun
+        <$> deserialize varSymb
+        <*> deserialize noun
+    | some ("DefnRel", Json.arr #[varSymb, rel, varSymb']) => DefnHead.rel
+        <$> deserialize varSymb
+        <*> deserialize rel
+        <*> deserialize varSymb'
+    | some ("DefnSymbolicPredicate", Json.arr #[symbPred, varSymbs]) => DefnHead.symbolicPredicate
+        <$> deserialize symbPred
+        <*> deserialize varSymbs
+    | _ => throwUnexpected "definition head" json
+
+instance : Deserializable Asm m where
+  deserialize json := match getInductive? json with
+    | some ("AsmSuppose", stmt) => Asm.suppose <$> deserialize stmt
+    | some ("AsmLetNoun", Json.arr #[vs, np]) => Asm.letNoun
+        <$> deserialize vs
+        <*> deserialize np
+    | some ("AsmLetIn", Json.arr #[vs, expr]) => Asm.letIn
+        <$> deserialize vs
+        <*> deserialize expr
+    | some ("AsmLetThe", Json.arr #[vs, fNoun]) => Asm.letThe
+        <$> deserialize vs
+        <*> deserialize fNoun
+    | some ("AsmLetEq", Json.arr #[vs, expr]) => Asm.letEq
+        <$> deserialize vs
+        <*> deserialize expr
+    | _ => throwUnexpected "assumption" json
+
+instance : Deserializable Defn m where
+  deserialize json := match getInductive? json with
+    | some ("Defn", Json.arr #[asms, defnHead, stmt]) => Defn.defn
+        <$> deserialize asms
+        <*> deserialize defnHead
+        <*> deserialize stmt
+    | some ("DefnFun", Json.arr #[asms, fNoun, term?, term]) => Defn.fun'
+        <$> deserialize asms
+        <*> deserialize fNoun
+        <*> deserialize term?
+        <*> deserialize term
+    | _ => throwUnexpected "definition" json
+
+instance : Deserializable Axiom m where
+  deserialize json := match getInductive? json with
+    | some ("Axiom", Json.arr #[asms, stmt]) => Axiom.mk
+        <$> deserialize asms
+        <*> deserialize stmt
+    | _ => throwUnexpected "axiom" json
+
+instance : Deserializable Lemma m where
+  deserialize json := match getInductive? json with
+    | some ("Lemma", Json.arr #[asms, stmt]) => Lemma.mk
+        <$> deserialize asms
+        <*> deserialize stmt
+    | _ => throwUnexpected "lemma" json
+
+instance : Deserializable Para m where
+  deserialize json := match getInductive? json with
+    | some ("ParaDefn", defn) => Para.defn' <$> deserialize defn
+    | some ("ParaLemma", Json.arr #[tag, lem]) => Para.lemma'
+        <$> deserialize tag
+        <*> deserialize lem
+    | _ => throwUnexpected "paragraph" json
 
 end Deserializable
 
