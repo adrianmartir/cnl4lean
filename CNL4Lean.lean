@@ -18,9 +18,10 @@ def json : DeserializeM Json := do
     | Except.ok json => json
     | Except.error msg => throw (parsingError msg)
 
+#print CNL4Lean.deserializeTerm
 
 -- This takes way to long to process..
-def getPara : DeserializeM Para := json >>= deserialize
+def getPara : DeserializeM Term := json >>= deserializeTerm
 -- This should simply be lowered to IO and then run.
 
 def f : IO DeserializationError := do
@@ -29,7 +30,5 @@ def f : IO DeserializationError := do
     | Except.ok c => panic! "oh yes"
     | Except.error e => e
 
--- def getChain' : IO (Except String (Except DeserializationError Chain)) :=
-  -- sorry
 
 #eval f

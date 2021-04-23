@@ -28,7 +28,7 @@ def defaultEnvironment : Environment := arbitrary
 #check TheoremVal.mk
 
 #check ConstantVal.mk
--- Note that these are not yet the kinds of objects that can be sent to the kernel. Instead, one needs to use `Lean.Declaration
+-- Note that these are not yet the kinds of M that can be sent to the kernel. Instead, one needs to use `Lean.Declaration
 
 -- Now lets look at `Lean.Expr`
 
@@ -95,7 +95,7 @@ def test : MetaM Unit := do
   -- This is legitimately cool, that this works.
   trace[Meta.debug] "p: {p}"
 
--- `MetaM` is probably the right API to consume in order to build custom lean objects. Moreover, it is the right context to do stuff like type inference, normal forms, etc. It seems like it is nice and logical.
+-- `MetaM` is probably the right API to consume in order to build custom lean M. Moreover, it is the right context to do stuff like type inference, normal forms, etc. It seems like it is nice and logical.
 -- `TermElabM` seems to be fundamentally tied to the lean elaborator and its macro expansion mechanism, I don't want to have anything to do with that.
 
 -- Hm, can we generate structs from `MetaM`? The structs seem to be stored in the environment.
@@ -161,3 +161,54 @@ def test : MetaM Unit := do
 -- Uhhh, how nice, there it is shown how the imports are done!
 
 -- #print (typeof! lambdaTelescope)
+
+-- https://jiggerwit.wordpress.com/2018/09/18/a-review-of-the-lean-theorem-prover/
+-- An actual, unparameterized, structure
+-- This better fits natural language.
+structure Magma where
+  obj: Type u
+  op: obj -> obj -> obj
+
+-- A purely notational typeclass
+-- It may be a good idea to separate notation from structures, since
+-- we might want to have the same composition operator for categories,
+-- groupoids and magmas.
+class Multiply (α: Type u) where
+  mul: α -> α -> α
+
+open Multiply
+
+-- Notation is separate from structure!!
+instance (M: Magma) : Multiply M.obj where
+  mul := M.op
+
+instance : CoeSort Magma (Type u) where
+  coe x := x.obj
+
+-- In this approach, if we have two magma structures on the same set,
+-- disambiguating the instances can easily be done by `mul (α := M)`.
+
+-- Compare to the set-based approach. There disambiguation requires
+-- unpacking the set and the its operations separately. This is
+-- slightly more annoying.
+theorem t (M: Magma) (x y: M) : mul x y = y := sorry
+
+#check Magma
+-- Perhaps the category-theoretic viewpoint is the most useful. We want 
+-- to think of `Magma` as the category of magmas. Then an object evidently
+-- is what we defined as `Magma`, not a weird parameterized typeclass.
+
+-- What you loose is the ability to confortably define structures of sets
+-- with two magma operations (e.g. Rings).
+structure Ring where
+  M: Magma
+  M': Magma
+  p: M.obj = M'.obj
+
+-- Now we can't write terms `x+yz` like one would in a ring, since addition
+-- and multiplication are not in the same sort.
+theorem s (R: Ring) (x y: R.M) : R.M.op x y = x := sorry
+-- This is very, very bad....
+
+-- I guess parameterization is necessary in order to make certain sorts
+-- definitionally equal.
