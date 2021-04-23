@@ -174,25 +174,20 @@ instance : Deserializable SgPl m where
     pure { sg := sg, pl := pl }
 
 mutual
-  unsafe def deserializeTerm (json: Json): m Term := match getInductive? json with
+  partial def deserializeTerm (json: Json): m Term := match getInductive? json with
     | some ("TermExpr", t) => Term.expr <$> deserialize t
     | some ("TermFun", t) => Term.function <$> deserializeFun t
     | _ => throwUnexpected "term" json
 
-  unsafe def deserializeFun : Json -> m Fun
-    | Json.arr #[sgPl, Json.arr args] => 
-      Fun.mk <$> deserialize sgPl <*> args.mapM deserializeTerm
+  partial def deserializeFun : Json -> m Fun
+    | Json.arr #[sgPl, Json.arr args] => Fun.mk <$> deserialize sgPl <*> args.mapM deserializeTerm'
     | json => throwUnexpected "functional noun" json
+  where
+    -- This is a workaround for a bug, where the lean kernel doesn't find 
+    -- the `deserializedTerm` namespace when passed to `mapM`
+    deserializeTerm' := deserializeTerm
 end
 
-mutual
-  partial def f :Int := g
-  partial def g : Int := f
-end
-
-#print deserializeTerm
-
-/-
 instance : Deserializable Fun m where
   deserialize := deserializeFun
 
@@ -397,13 +392,7 @@ instance : Deserializable Para m where
         <$> deserialize tag
         <*> deserialize lem
     | _ => throwUnexpected "paragraph" json
--/
+
 end Deserializable
 
 abbrev DeserializeM := ExceptT DeserializationError IO
-
-#check deserializeTerm (m:= DeserializeM)
-
-unsafe def h : Json -> DeserializeM Term := deserializeTerm (m:= DeserializeM)
-
--- #check f
