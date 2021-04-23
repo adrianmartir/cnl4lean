@@ -48,6 +48,7 @@ variable [Monad m] [MonadExcept DeserializationError m]
 instance : Inhabited (m α) where
   default := throw arbitrary
 
+
 instance [Deserializable α m] : Deserializable (Array α) m where
   deserialize
     | Json.arr a => a.mapM deserialize
@@ -154,6 +155,7 @@ instance : Deserializable SymbolicPredicate m where
     | Json.arr #[Json.str pred, (arity : Int)] => SymbolicPredicate.mk pred arity
     | json => throwUnexpected "symbolic predicate" json
 
+
 instance : Deserializable Formula m where
   deserialize (json: Json) : m Formula := match getInductive? json with
   | some ("FormulaChain", t) => Formula.chain <$> deserialize t
@@ -161,9 +163,6 @@ instance : Deserializable Formula m where
     Formula.predicate <$> deserialize pred <*> args.mapM deserialize
   | _ => throwUnexpected "formula" json
 
-
-
-/-
 instance : Deserializable SgPl m where
   deserialize (json: Json) : m SgPl := do
     let sg <- match json.getObjVal? "sg" with
@@ -176,21 +175,30 @@ instance : Deserializable SgPl m where
     
     pure { sg := sg, pl := pl }
 
-mutual
-  partial def deserializeTerm (json: Json): m Term := match getInductive? json with
-    | some ("TermExpr", t) => Term.expr <$> deserialize t
-    | some ("TermFun", t) => Term.function <$> deserializeFun t
-    | _ => throwUnexpected "term" json
+abbrev DeserializeM := ExceptT DeserializationError IO
 
-  partial def deserializeFun : Json -> m Fun
-    | Json.arr #[sgPl, Json.arr args] => Fun.mk <$> deserialize sgPl <*> args.mapM deserializeTerm'
-    | json => throwUnexpected "functional noun" json
-  where
-    -- This is a workaround for a bug, where the lean kernel doesn't find 
-    -- the `deserializedTerm` namespace when passed to `mapM`
-    deserializeTerm' := deserializeTerm
-end
+set_option profiler true
 
+def f : Json -> DeserializeM SgPl := deserialize
+
+set_option profiler false
+
+-- mutual
+--   partial def deserializeTerm (json: Json): m Term := match getInductive? json with
+--     | some ("TermExpr", t) => Term.expr <$> deserialize t
+--     | some ("TermFun", t) => Term.function <$> deserializeFun t
+--     | _ => throwUnexpected "term" json
+
+--   partial def deserializeFun : Json -> m Fun
+--     | Json.arr #[sgPl, Json.arr args] => Fun.mk <$> deserialize sgPl <*> args.mapM deserializeTerm'
+--     | json => throwUnexpected "functional noun" json
+--   where
+--     -- This is a workaround for a bug, where the lean kernel doesn't find 
+--     -- the `deserializedTerm` namespace when passed to `mapM`
+--     deserializeTerm' := deserializeTerm
+-- end
+
+/-
 instance : Deserializable Fun m where
   deserialize := deserializeFun
 
