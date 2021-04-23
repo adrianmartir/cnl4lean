@@ -161,6 +161,9 @@ instance : Deserializable Formula m where
     Formula.predicate <$> deserialize pred <*> args.mapM deserialize
   | _ => throwUnexpected "formula" json
 
+
+
+/-
 instance : Deserializable SgPl m where
   deserialize (json: Json) : m SgPl := do
     let sg <- match json.getObjVal? "sg" with
@@ -396,3 +399,6 @@ instance : Deserializable Para m where
 end Deserializable
 
 abbrev DeserializeM := ExceptT DeserializationError IO
+
+def deserialize' : Json -> DeserializeM Para := deserialize -/
+-- This takes 3:25 min for getting processed. This is not normal
