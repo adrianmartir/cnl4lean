@@ -65,12 +65,17 @@ private partial def interpretExpr
 
 instance : Means Grammar.Expr Expr := mk interpretExpr
 
+
+private def interpretApp [a: Means α Name] [b: Means β Expr] (ident: α) (args: Array β) : MetaM Expr := do
+  let args <- args.mapM interpret
+  let ident <- interpret ident
+  mkAppM ident args
+
 mutual
   -- Patterns add indirection.
   partial def interpretFun (fun' : Grammar.Fun) : MetaM Expr := match fun' with
-    | Grammar.Fun.mk lexicalPhrase args => do
-      let args <- args.mapM interpretTerm
-      mkAppM (Grammar.SgPl.toName lexicalPhrase) args
+    | Grammar.Fun.mk lexicalPhrase args =>
+        interpretApp (b := mk interpretTerm) lexicalPhrase args
 
   partial def interpretTerm (term : Grammar.Term) : MetaM Expr := match term with
     | Grammar.Term.expr e => interpretExpr e
@@ -80,22 +85,19 @@ end
 instance : Means Grammar.Fun Expr := mk interpretFun
 instance : Means Grammar.Term Expr := mk interpretTerm
 
-private def interpretApp [Means α Expr] (ident: Name) (args: Array α) : MetaM Expr := do
-  let args <- args.mapM interpret
-  mkAppM ident args
 
 instance [Means α Expr]: Means (Grammar.Noun α) Expr where
   interpret
-    | Grammar.Noun.mk sgPl args => interpretApp (Grammar.SgPl.toName sgPl) args
+    | Grammar.Noun.mk sgPl args => interpretApp sgPl args
     -- Maybe ensure that the result is `?m -> Prop`?
 
 instance [Means α Expr]: Means (Grammar.Adj α) Expr where
   interpret
-    | Grammar.Adj.mk pat args => interpretApp (Grammar.Pattern.toName pat) args
+    | Grammar.Adj.mk pat args => interpretApp pat args
 
 instance [Means α Expr]: Means (Grammar.Verb α) Expr where
   interpret
-    | Grammar.Verb.mk sgPl args => interpretApp (Grammar.SgPl.toName sgPl) args
+    | Grammar.Verb.mk sgPl args => interpretApp sgPl args
 
 -- `negate : (α -> Prop) -> (α -> Prop)` is in `Init.lean`!
 -- Does this work without `mkAppM`?
@@ -116,11 +118,11 @@ instance : Means Grammar.VerbPhrase Expr where
 
 instance : Means Grammar.AdjL Expr where
   interpret
-    | Grammar.AdjL.mk pat args => interpretApp (Grammar.Pattern.toName pat) args
+    | Grammar.AdjL.mk pat args => interpretApp pat args
 
 instance : Means Grammar.AdjR Expr where
   interpret
-    | Grammar.AdjR.adjR pat args => interpretApp (Grammar.Pattern.toName pat) args
+    | Grammar.AdjR.adjR pat args => interpretApp pat args
     | Grammar.AdjR.attrRThat verbPhrase => interpret verbPhrase
 
 mutual
@@ -137,9 +139,9 @@ private partial def interpretNPVars : Grammar.NounPhraseVars -> MetaM Expr
 private partial def interpretQP : Grammar.QuantPhrase -> MetaM Expr
   | Grammar.QuantPhrase.mk q np => do
       let expr <- interpretNPVars np
-      let vars: Array Expr <- np.vars.mapM interpret
+      let vars: Array Name <- np.vars.mapM interpret
       -- `Elab.Term.ensureType` also tries to coerce into a type, but
-      -- lets not overcomplicate things
+      -- lets not overcomplicate things for now
       if <- isProp expr then
         sorry
       else
