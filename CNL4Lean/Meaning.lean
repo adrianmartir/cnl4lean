@@ -10,111 +10,149 @@ namespace CNL4Lean
 open Lean
 open Lean.Meta
 
--- In this module I use the `MetaM` monad as a logic framework that exposes leans 
--- internals. I decided against using the `TermElabM` monad, because it contains many
+-- In this module I use the `MetaM` monad as a logic framework that exposes leans
+-- internals. I decided against using the `Grammar.TermElabM` monad, because it contains many
 -- lean-specific mechanisms, like macro expansion and debugging. Most of the instances
--- for `TermElabM` contain lean-specific `Syntax` objects or macro stuff.
+-- for `Grammar.TermElabM` contain lean-specific `Syntax` objects or macro stuff.
 
--- In any case, I will probably need to read the `TermElabM` monad source code and copy
+-- In any case, I will probably need to read the `Grammar.TermElabM` monad source code and copy
 -- some of the patterns I see there.
 
 -- For instance, I will need to learn
 -- * How to create metavariables for types to be inferred (For now I could make all types explicit)
 -- * Namespacing and modules (this seems to be quite confusing)
 
--- It might be worth looking at `elabOpen` and `elabTerm` in `Elab/Term.lean`.
+-- It might be worth looking at `elabOpen` and `elabGrammar.Term` in `Elab/Grammar.Term.lean`.
 
-def interpretVar (var: VarSymbol) : Expr := match var with
-  -- `mkFVar` might really be way to low level. Don't we need to somehow specify the type
-  -- of it?
-  | VarSymbol.namedVar name => Name.mkSimple name |> mkFVar
+class Means (α: Type) (β: Type) where
+  interpret : α -> MetaM β
+
+open Means
+
+instance : Means Grammar.Pattern Name where
+  interpret pat :=
+    pat.foldl (fun acc next => acc ++ toString next) ""
+      |> Name.mkSimple
+
+instance : Means Grammar.SgPl Name where
+  interpret pat := interpret pat.sg
+
+instance : Means Grammar.VarSymbol Name where
+  interpret (var: Grammar.VarSymbol) : Name := match var with
+  -- `mkFVar` might really be way to low level. Note that when
+  -- first declaring the variable, it needs to have a type and
+  -- then needs to get added to the context.
+  | Grammar.VarSymbol.namedVar name => Name.mkSimple name
   | _ => sorry -- I think this rarely occurs
 
--- The identifier should be stored in the symbol datatype and in the vocabulary
--- It should be possible to look up these identifiers in the environment.
--- When building expressions, these identifiers are assumed to be in the environment.
--- They are added to the environment by imports and definitions.
-def Ident.toName (ident : Ident) : Name := sorry
-
-def Tok.toName (tok : Tok) : Name := sorry
-
--- Does the have to get registered at some point? Yes. They are expected to be in the
--- local context from which the `MetaM` monad has been invoked. For instance, we may
--- have some assumptions in a lemma. Or in quantifiers(?). Then we somehow need to launch
--- the `MetaM` monad again in that context.
-partial def interpretExpr (expr: Expr') : MetaM Expr := match expr with
-  | Expr'.var var => interpretVar var
-  | Expr'.int (Int.ofNat n) => mkNatLit n
-  | Expr'.int _ => panic! "Integer literals can't be negative."
+private partial def interpretExpr
+  | Grammar.Expr.var var => mkFVar <$> interpret var
+  | Grammar.Expr.int (Int.ofNat n) => mkNatLit n
+  | Grammar.Expr.int _ => panic! "Integer literals can't be negative."
   -- The identifiers should be queried from the pattern definition tex labels.
   -- We use `mkAppM` in order to enable stuff like typeclasses and implicit arguments
   -- (at least theoretically)
-  | Expr'.symbol symb args => do
-    let args <- (NonEmpty.toArray args).sequenceMap interpretExpr
+  | Grammar.Expr.mixfix symb args => do
+    let args <- args.mapM interpretExpr
     -- Patterns add indirection.
-    match symb with
-      | Symbol.const t => mkAppM (Tok.toName t) args
-      | Symbol.mixfix ident _ => mkAppM (Ident.toName ident) args
+    mkAppM sorry args
+  | Grammar.Expr.app _ _ => sorry
+    -- We want a dumbed-down application here(no implicits).
+    -- Typeclasses should be merely a **notational** construct - which in
+    -- CNL has gets handled in *patterns*. This should be only for doing
+    -- higher order logic.
   | _ => sorry
+
+instance : Means Grammar.Expr Expr := mk interpretExpr
 
 mutual
   -- Patterns add indirection.
-  partial def interpretFun (fun' : Fun) : MetaM Expr := match fun' with
-    | Fun.lexicalPhrase ident lexicalPhrase args => do
-      let args <- (List.toArray args).sequenceMap interpretTerm
-      mkAppM (Ident.toName ident) args
+  partial def interpretFun (fun' : Grammar.Fun) : MetaM Expr := match fun' with
+    | Grammar.Fun.mk lexicalPhrase args => do
+      let args <- args.mapM interpretTerm
+      mkAppM (Grammar.SgPl.toName lexicalPhrase) args
 
-  partial def interpretTerm (term : Term) : MetaM Expr := match term with
-    | Term.expr e => interpretExpr e
-    | Term.function f => interpretFun f
+  partial def interpretTerm (term : Grammar.Term) : MetaM Expr := match term with
+    | Grammar.Term.expr e => interpretExpr e
+    | Grammar.Term.function f => interpretFun f
 end
 
-private def interpretApp (ident: Name) (args: List Term) : MetaM Expr := do
-  let args <- (List.toArray args).sequenceMap interpretTerm
+instance : Means Grammar.Fun Expr := mk interpretFun
+instance : Means Grammar.Term Expr := mk interpretTerm
+
+private def interpretApp [Means α Expr] (ident: Name) (args: Array α) : MetaM Expr := do
+  let args <- args.mapM interpret
   mkAppM ident args
 
-def interpretNoun (noun: Noun Term) : MetaM Expr := 
-  interpretApp (Ident.toName noun.ident) noun.arguments
-  -- Maybe ensure that the result is `?m -> Prop`?
+instance [Means α Expr]: Means (Grammar.Noun α) Expr where
+  interpret
+    | Grammar.Noun.mk sgPl args => interpretApp (Grammar.SgPl.toName sgPl) args
+    -- Maybe ensure that the result is `?m -> Prop`?
 
-def interpretAdj (adj: Adj Term) : MetaM Expr := 
-  interpretApp (Ident.toName adj.ident) adj.arguments
+instance [Means α Expr]: Means (Grammar.Adj α) Expr where
+  interpret
+    | Grammar.Adj.mk pat args => interpretApp (Grammar.Pattern.toName pat) args
 
-def interpretVerb (verb: Verb Term) : MetaM Expr := 
-  interpretApp (Ident.toName verb.ident) verb.arguments
+instance [Means α Expr]: Means (Grammar.Verb α) Expr where
+  interpret
+    | Grammar.Verb.mk sgPl args => interpretApp (Grammar.SgPl.toName sgPl) args
 
-def negatePredicate (pred : Expr) : Expr := sorry
+-- `negate : (α -> Prop) -> (α -> Prop)` is in `Init.lean`!
+-- Does this work without `mkAppM`?
+def negate (e: Expr) : MetaM Expr := mkAppM `negate #[e]
 
-def interpretVerbPhrase (verbPhrase : VerbPhrase) : MetaM Expr := match verbPhrase with
-  | VerbPhrase.verb verb => interpretVerb verb
-  | VerbPhrase.adj adj => interpretAdj adj
-  | VerbPhrase.verbNot verb => do
-    let pred <- interpretVerb verb
-    negatePredicate pred
-  | VerbPhrase.adjNot adj => do
-    let pred <- interpretAdj adj
-    negatePredicate pred
+def conjunction (p1: Expr) (p2: Expr) : MetaM Expr :=
+  mkAppM `conjunction #[p1, p2]
 
-def interpretAdjL (adj: AdjL) : MetaM Expr :=
-  interpretAdj (Adj.mk adj.ident adj.lexicalPhrase adj.arguments)
+def disjunction (p1: Expr) (p2: Expr) : MetaM Expr :=
+  mkAppM `disjunction #[p1, p2]
 
-def interpretAdjR (adj: AdjR) : MetaM Expr := match adj with
-  | AdjR.adjR adj => interpretAdj adj
-  | AdjR.attrRThat verbPhrase => interpretVerbPhrase verbPhrase
+instance : Means Grammar.VerbPhrase Expr where
+  interpret
+    | Grammar.VerbPhrase.verb verb => interpret verb
+    | Grammar.VerbPhrase.adj adj => interpret adj
+    | Grammar.VerbPhrase.verbNot verb => interpret verb >>= negate
+    | Grammar.VerbPhrase.adjNot adj => interpret adj >>= negate
 
-def interpretNounPhrase (nounPhrase : NounPhrase) : MetaM Expr := match nounPhrase with
-  | NounPhrase.nounPhrase adjL noun varSymb? adjR stmt? => sorry -- This should be an `and`
+instance : Means Grammar.AdjL Expr where
+  interpret
+    | Grammar.AdjL.mk pat args => interpretApp (Grammar.Pattern.toName pat) args
 
-def interpretNounPhraseVars (nounPhrase : NounPhraseVars) : MetaM Expr := match nounPhrase with
-  | NounPhraseVars.nounPhrase adjL noun varSymbs adjR stmt? => sorry -- This should be an `and`
+instance : Means Grammar.AdjR Expr where
+  interpret
+    | Grammar.AdjR.adjR pat args => interpretApp (Grammar.Pattern.toName pat) args
+    | Grammar.AdjR.attrRThat verbPhrase => interpret verbPhrase
 
+mutual
+private partial def interpretNP : Grammar.NounPhrase -> MetaM Expr
+  | Grammar.NounPhrase.mk adjL noun varSymb? adjR stmt? => sorry
+  -- This should be an `and` and it should also abstract `stmt?` by
+  -- using `varSymb?`.
 
+private partial def interpretNPVars : Grammar.NounPhraseVars -> MetaM Expr
+  | Grammar.NounPhraseVars.mk adjL noun varSymbs adjR stmt? => sorry
+  -- This should be an `and`
 
-def interpretAsm (asm : Asm) : MetaM Int := sorry
+-- A simplified version of `Elab.Term.elabForall`
+private partial def interpretQP : Grammar.QuantPhrase -> MetaM Expr
+  | Grammar.QuantPhrase.mk q np => do
+      let expr <- interpretNPVars np
+      let vars: Array Expr <- np.vars.mapM interpret
+      -- `Elab.Term.ensureType` also tries to coerce into a type, but
+      -- lets not overcomplicate things
+      if <- isProp expr then
+        sorry
+      else
+        throwError "proposition expected"
+
+private partial def interpretStmt : Grammar.Stmt -> MetaM Expr := sorry
+end
+
+def interpretAsm (asm : Grammar.Asm) : MetaM Int := sorry
 -- 1) Simply add the variable to the local context (without type) (say, `x : ?m`).
 -- 2) Run `MetaM` in that context in order to parse the statement/expression/...
 
 
 -- This should yield a context of declarations.
 
-def interpretPara (p: Para) : MetaM Unit := sorry
+def interpretPara (p: Grammar.Para) : MetaM Unit := sorry

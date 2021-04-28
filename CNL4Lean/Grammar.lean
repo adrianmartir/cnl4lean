@@ -1,21 +1,18 @@
 
-namespace CNL4Lean
+namespace CNL4Lean.Grammar
 
-
--- We want the abstract grammar to be as general as Adrian's `Abstract.hs` or even
--- more general. The reason is, that we don't want the deserialization process the option
--- to give out errors that are not merely deserialization errors.
-
--- If this is ever going to be a finished product, one should also propagate position
--- information for debugging to here.
-
--- `Tokenizer.hs`
+-- In order to make deserialization more streamlined painless, we disregard
+-- lean naming conventions and use the Haskell naming conventions
+-- and mimic Haskell behaviour by using export declaration. (This is WIP)
+-- This should enable light deserialization automation in the future
 
 inductive Delim where
-  | invis : Delim
-  | paren : Delim
-  | brace : Delim
-  | bracket : Delim
+  | Invis : Delim
+  | Paren : Delim
+  | Brace : Delim
+  | Bracket : Delim
+
+export Delim (Invis Paren Brace Bracket)
 
 -- This doesn't include all tokens, since some kinds are not allowed in `Adapt.hs`
 inductive Tok where
@@ -26,6 +23,29 @@ inductive Tok where
   | command : String -> Tok
   | open' : Delim -> Tok
   | close : Delim -> Tok
+
+instance : ToString Tok where
+  toString
+    | Tok.word w => w
+    | Tok.variable' v => v
+    | Tok.symbol s => s
+    | Tok.integer i => toString i
+    | Tok.command c => "\\" ++ c
+    | Tok.open' delim => match delim with
+      | Invis => "{"
+      | Paren => "("
+      | Brace => "\\{"
+      | Bracket => "["
+    | Tok.close d => match d with
+      | Invis => "}"
+      | Paren => ")"
+      | Brace => "\\}"
+      | Bracket => "]"
+
+instance : ToString (Option Tok) where
+  toString
+    | some t => toString t
+    | none => "_"
 
 abbrev Pattern := Array (Option Tok)
 
@@ -39,12 +59,12 @@ inductive VarSymbol where
 
 -- `Abstract.hs`
 
-inductive Expr' where
-  | var : VarSymbol -> Expr'
-  | int : Int -> Expr'
-  | const : Tok -> Expr'
-  | mixfix : Pattern -> Array Expr' -> Expr'
-  | app : Expr' -> Expr' -> Expr'
+inductive Expr where
+  | var : VarSymbol -> Expr
+  | int : Int -> Expr
+  | const : Tok -> Expr
+  | mixfix : Pattern -> Array Expr -> Expr
+  | app : Expr -> Expr -> Expr
 
 -- A binary relation
 abbrev Relator := Tok
@@ -55,16 +75,16 @@ inductive Sign where
 
 inductive Chain where
   -- This is simply one relation symbol applied to a bunch of expressions
-  | chainBase : Array Expr' -> Sign -> Relator -> Array Expr' -> Chain
+  | chainBase : Array Expr -> Sign -> Relator -> Array Expr -> Chain
   -- We can also chain relations:
-  | chainCons : Array Expr' -> Sign -> Relator -> Chain -> Chain
+  | chainCons : Array Expr -> Sign -> Relator -> Chain -> Chain
 
 inductive SymbolicPredicate where
   | mk : String -> Int -> SymbolicPredicate
 
 inductive Formula where
   | chain : Chain -> Formula
-  | predicate : SymbolicPredicate -> Array Expr' -> Formula
+  | predicate : SymbolicPredicate -> Array Expr -> Formula
 
 
 structure SgPl where
@@ -78,7 +98,7 @@ mutual
   -- Actually, that is not true. If I define the semantics
   -- by using 'patterns as functions', then the patterns
   -- must add indirection, so this doesn't work. At some point we
-  -- probably want patterns(for `Expr'` and for `Fun`) that don't add indirection, so this
+  -- probably want patterns(for `Expr` and for `Fun`) that don't add indirection, so this
   -- idea is possible.
 
   -- e.g. "A functor from $C$ to $D$."
@@ -88,7 +108,7 @@ mutual
   -- Note: This does not allow putting functional nouns inside symbolic
   -- expressions
   inductive Term where
-    | expr : Expr' -> Term   -- Symbolic version
+    | expr : Expr -> Term   -- Symbolic version
     | function : Fun -> Term -- Version with words
 end
 
@@ -99,7 +119,7 @@ inductive Noun (α: Type u) where
   -- The `lexicalPhrase` is a map `A_1 -> ... -> A_n -> B -> Prop`, where `n` is the number of holes in the pattern.
   -- Then the semantics of the hole insert those arguments, so a noun would interpret
   -- to a term of `B -> Prop`. The last argument will get inserted by `Stmt`.
-  
+
   -- That would be the variant adding indirection. If we want to avoid adding indirection:
   -- Use proposition with n+1 free variables, then substitute the arguments in directly.
 
@@ -115,7 +135,7 @@ inductive Adj (α: Type u) where
 
 inductive Verb (α : Type u) where
   -- SEM: See `Noun`.
-  | mk : SgPl ->  Array Term -> Verb α
+  | mk : SgPl ->  Array α -> Verb α
 
 -- We should use `Sign` here
 inductive VerbPhrase where
@@ -147,7 +167,7 @@ inductive Quantifier where
 -- We probably won't need this.
 inductive Bound where
   | unbounded
-  | bounded : Sign -> Relator -> Expr' -> Bound
+  | bounded : Sign -> Relator -> Expr -> Bound
 
 mutual
   -- Interprets to an expression `p` of type `?b -> Prop`.
@@ -156,10 +176,10 @@ mutual
 
   inductive NounPhraseVars where
     | mk : AdjL -> Noun Term -> Array VarSymbol -> AdjR -> Option Stmt -> NounPhraseVars
-  
+
   inductive QuantPhrase where
     | mk : Quantifier -> NounPhraseVars -> QuantPhrase
-  
+
   -- Interprets to an expression of type `Prop`. Note that we could technically also allow
   -- more direct, term-based ways for constructing statements and when interpreting we could
   -- simply tell the unifier that the type should be `Prop`.
@@ -173,6 +193,12 @@ mutual
     | quantPhrase : QuantPhrase -> Stmt -> Stmt
     | symbolicQuantified : QuantPhrase -> Array VarSymbol -> Bound -> Option Stmt -> Stmt -> Stmt
 end
+
+def NounPhrase.var : NounPhrase -> Option VarSymbol
+  | NounPhrase.mk _ _ vs _ _ => vs
+
+def NounPhraseVars.vars : NounPhraseVars -> Array VarSymbol
+  | NounPhraseVars.mk _ _ vs _ _ => vs
 
 inductive DefnHead where
   | adj : Option NounPhrase -> VarSymbol -> Adj VarSymbol -> DefnHead
@@ -198,7 +224,7 @@ inductive Asm where
   -- we can accept typing declarations anywhere in the grammatical tree.
   | letNoun : Array VarSymbol -> NounPhrase -> Asm
   -- A typing declaration.
-  | letIn : Array VarSymbol -> Expr' -> Asm
+  | letIn : Array VarSymbol -> Expr -> Asm
   -- A 'let x := e in B(x)' declaration.
   -- Map to a lean-internal let expression.
   -- We use this instead of using a forall with an equality axiom because in this case
@@ -208,7 +234,7 @@ inductive Asm where
   -- Map to a lean-internal let expression.
   -- We should consider modifying this type in the parser so that it reflects the
   -- assumption that the left hand side is a variable.
-  | letEq : VarSymbol -> Expr' -> Asm
+  | letEq : VarSymbol -> Expr -> Asm
 
 inductive Defn where
   -- This should behave like a telescope. I need to rerun `MetaM` after unpacking each

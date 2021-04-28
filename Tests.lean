@@ -83,7 +83,7 @@ def test : MetaM Unit := do
 
   let m <- mkFreshExprMVar (mkSort levelOne)
   let p <- mkAppM `List #[m]
-  
+
   -- This should probably be able to resolve `g` directly,
   -- but for some reason it doesn't work. It's probably
   -- because the `#check` command doesn't pass the list of
@@ -126,7 +126,7 @@ def test : MetaM Unit := do
 #print withReader
 
 -- I guess the only question left is how to correctly format names. The docstring of
--- `lctx.mkLocalDecl` from the `LocalContext.lean` file says that its API is very low 
+-- `lctx.mkLocalDecl` from the `LocalContext.lean` file says that its API is very low
 -- level and that instead one should use `TacticM` or `TermElabM`. Since `MetaM` also
 -- has a `mkFreshId` function(implements the corresponding typeclass), it should be
 -- also safe to use `MetaM`
@@ -162,53 +162,14 @@ def test : MetaM Unit := do
 
 -- #print (typeof! lambdaTelescope)
 
--- https://jiggerwit.wordpress.com/2018/09/18/a-review-of-the-lean-theorem-prover/
--- An actual, unparameterized, structure
--- This better fits natural language.
-structure Magma where
-  obj: Type u
-  op: obj -> obj -> obj
+variable (A B: Prop)
 
--- A purely notational typeclass
--- It may be a good idea to separate notation from structures, since
--- we might want to have the same composition operator for categories,
--- groupoids and magmas.
-class Multiply (α: Type u) where
-  mul: α -> α -> α
+def C := And A B
 
-open Multiply
+-- These seem to be equivalent
+#check (α: Type) -> Array α
+#check forall α: Type, Array α
 
--- Notation is separate from structure!!
-instance (M: Magma) : Multiply M.obj where
-  mul := M.op
+#check exists n, n = 0
 
-instance : CoeSort Magma (Type u) where
-  coe x := x.obj
-
--- In this approach, if we have two magma structures on the same set,
--- disambiguating the instances can easily be done by `mul (α := M)`.
-
--- Compare to the set-based approach. There disambiguation requires
--- unpacking the set and the its operations separately. This is
--- slightly more annoying.
-theorem t (M: Magma) (x y: M) : mul x y = y := sorry
-
-#check Magma
--- Perhaps the category-theoretic viewpoint is the most useful. We want 
--- to think of `Magma` as the category of magmas. Then an object evidently
--- is what we defined as `Magma`, not a weird parameterized typeclass.
-
--- What you loose is the ability to confortably define structures of sets
--- with two magma operations (e.g. Rings).
-structure Ring where
-  M: Magma
-  M': Magma
-  p: M.obj = M'.obj
-
--- Now we can't write terms `x+yz` like one would in a ring, since addition
--- and multiplication are not in the same sort.
-theorem s (R: Ring) (x y: R.M) : R.M.op x y = x := sorry
--- This is very, very bad....
-
--- I guess parameterization is necessary in order to make certain sorts
--- definitionally equal.
+#check Sort 0

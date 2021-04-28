@@ -3,7 +3,7 @@ import Lean
 import CNL4Lean.Grammar
 import CNL4Lean.Deserialize
 
-/-
+
 open Lean
 open CNL4Lean
 open Deserializable
@@ -19,7 +19,6 @@ def json : DeserializeM Json := do
     | Except.ok json => json
     | Except.error msg => throw (parsingError msg)
 
--- This takes way to long to process..
 def getPara : DeserializeM Para := json >>= deserialize
 -- This should simply be lowered to IO and then run.
 
@@ -30,5 +29,4 @@ def f : IO DeserializationError := do
     | Except.error e => e
 
 
-#eval f
--/
+-- #eval f
