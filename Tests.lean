@@ -166,9 +166,12 @@ variable (A B: Prop)
 
 def C := And A B
 
+universe u
+variable (S : Type u)
+
 -- These seem to be equivalent
 #check (α: Type) -> Array α
-#check forall α: Type, Array α
+#check forall (α : Type u), Array α = Array S
 
 #check exists n, n = 0
 

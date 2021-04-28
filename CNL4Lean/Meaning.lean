@@ -29,6 +29,15 @@ class Means (α: Type) (β: Type) where
 
 open Means
 
+-- The following two definitions are used in order to write partial
+-- instances of `Means`, since currently instances and `partial`
+-- don't get along.
+instance : Inhabited (Means α β) where
+  default := mk fun x => arbitrary
+
+def interpret' {α β : Type} (means : Means α β) := @interpret α β means
+
+
 instance : Means Grammar.Pattern Name where
   interpret pat :=
     pat.foldl (fun acc next => acc ++ toString next) ""
@@ -45,7 +54,9 @@ instance : Means Grammar.VarSymbol Name where
   | Grammar.VarSymbol.namedVar name => Name.mkSimple name
   | _ => sorry -- I think this rarely occurs
 
-private partial def interpretExpr
+
+partial instance meansE: Means Grammar.Expr Expr where
+  interpret
   | Grammar.Expr.var var => mkFVar <$> interpret var
   | Grammar.Expr.int (Int.ofNat n) => mkNatLit n
   | Grammar.Expr.int _ => panic! "Integer literals can't be negative."
@@ -53,7 +64,7 @@ private partial def interpretExpr
   -- We use `mkAppM` in order to enable stuff like typeclasses and implicit arguments
   -- (at least theoretically)
   | Grammar.Expr.mixfix symb args => do
-    let args <- args.mapM interpretExpr
+    let args <- args.mapM <| interpret' meansE
     -- Patterns add indirection.
     mkAppM sorry args
   | Grammar.Expr.app _ _ => sorry
@@ -63,41 +74,37 @@ private partial def interpretExpr
     -- higher order logic.
   | _ => sorry
 
-instance : Means Grammar.Expr Expr := mk interpretExpr
 
-
-private def interpretApp [a: Means α Name] [b: Means β Expr] (ident: α) (args: Array β) : MetaM Expr := do
+private def interpretApp [m1: Means α Name] [m2: Means β Expr] (ident: α) (args: Array β) : MetaM Expr := do
   let args <- args.mapM interpret
   let ident <- interpret ident
   mkAppM ident args
 
 mutual
   -- Patterns add indirection.
-  partial def interpretFun (fun' : Grammar.Fun) : MetaM Expr := match fun' with
+  partial instance meansF : Means Grammar.Fun Expr where
+    interpret
     | Grammar.Fun.mk lexicalPhrase args =>
-        interpretApp (b := mk interpretTerm) lexicalPhrase args
+        interpretApp (m2 := meansT) lexicalPhrase args
 
-  partial def interpretTerm (term : Grammar.Term) : MetaM Expr := match term with
-    | Grammar.Term.expr e => interpretExpr e
-    | Grammar.Term.function f => interpretFun f
+  partial instance meansT : Means Grammar.Term Expr where
+    interpret
+    | Grammar.Term.expr e => interpret e
+    | Grammar.Term.function f => interpret' meansF f
 end
-
-instance : Means Grammar.Fun Expr := mk interpretFun
-instance : Means Grammar.Term Expr := mk interpretTerm
 
 
 instance [Means α Expr]: Means (Grammar.Noun α) Expr where
   interpret
-    | Grammar.Noun.mk sgPl args => interpretApp sgPl args
-    -- Maybe ensure that the result is `?m -> Prop`?
+  | Grammar.Noun.mk sgPl args => interpretApp sgPl args
 
 instance [Means α Expr]: Means (Grammar.Adj α) Expr where
   interpret
-    | Grammar.Adj.mk pat args => interpretApp pat args
+  | Grammar.Adj.mk pat args => interpretApp pat args
 
 instance [Means α Expr]: Means (Grammar.Verb α) Expr where
   interpret
-    | Grammar.Verb.mk sgPl args => interpretApp sgPl args
+  | Grammar.Verb.mk sgPl args => interpretApp sgPl args
 
 -- `negate : (α -> Prop) -> (α -> Prop)` is in `Init.lean`!
 -- Does this work without `mkAppM`?
@@ -111,50 +118,60 @@ def disjunction (p1: Expr) (p2: Expr) : MetaM Expr :=
 
 instance : Means Grammar.VerbPhrase Expr where
   interpret
-    | Grammar.VerbPhrase.verb verb => interpret verb
-    | Grammar.VerbPhrase.adj adj => interpret adj
-    | Grammar.VerbPhrase.verbNot verb => interpret verb >>= negate
-    | Grammar.VerbPhrase.adjNot adj => interpret adj >>= negate
+  | Grammar.VerbPhrase.verb verb => interpret verb
+  | Grammar.VerbPhrase.adj adj => interpret adj
+  | Grammar.VerbPhrase.verbNot verb => do negate (<- interpret verb)
+  | Grammar.VerbPhrase.adjNot adj => do negate (<- interpret adj)
 
 instance : Means Grammar.AdjL Expr where
   interpret
-    | Grammar.AdjL.mk pat args => interpretApp pat args
+  | Grammar.AdjL.mk pat args => interpretApp pat args
 
 instance : Means Grammar.AdjR Expr where
   interpret
-    | Grammar.AdjR.adjR pat args => interpretApp pat args
-    | Grammar.AdjR.attrRThat verbPhrase => interpret verbPhrase
+  | Grammar.AdjR.adjR pat args => interpretApp pat args
+  | Grammar.AdjR.attrRThat verbPhrase => interpret verbPhrase
+
+
+-- Eventually we want to support optional type annotations in binders (in `vars`)
+partial def inContext (vars: Array Name) (declaredVars: Array Expr) (k: Array Expr -> MetaM α) : MetaM α := do
+  let v ← mkFreshLevelMVar
+  let type <- mkFreshExprMVar (mkSort v)
+  -- We need to somehow recursively run `withLocalDecl` and gather the
+  -- free variables in `declaredVars`.
+  withLocalDecl vars[0] BinderInfo.default type k
 
 mutual
-private partial def interpretNP : Grammar.NounPhrase -> MetaM Expr
-  | Grammar.NounPhrase.mk adjL noun varSymb? adjR stmt? => sorry
-  -- This should be an `and` and it should also abstract `stmt?` by
-  -- using `varSymb?`.
+  partial instance meansNP : Means Grammar.NounPhrase Expr where
+    interpret
+    | Grammar.NounPhrase.mk adjL noun varSymb? adjR stmt? => sorry
+    -- This should be an `and` and it should also abstract `stmt?` by
+    -- using `varSymb?`.
 
-private partial def interpretNPVars : Grammar.NounPhraseVars -> MetaM Expr
-  | Grammar.NounPhraseVars.mk adjL noun varSymbs adjR stmt? => sorry
-  -- This should be an `and`
+  partial instance meansNPV : Means Grammar.NounPhraseVars Expr where
+    interpret
+    | Grammar.NounPhraseVars.mk adjL noun varSymbs adjR stmt? => sorry
+    -- This should be an `and`
 
--- A simplified version of `Elab.Term.elabForall`
-private partial def interpretQP : Grammar.QuantPhrase -> MetaM Expr
-  | Grammar.QuantPhrase.mk q np => do
-      let expr <- interpretNPVars np
-      let vars: Array Name <- np.vars.mapM interpret
-      -- `Elab.Term.ensureType` also tries to coerce into a type, but
-      -- lets not overcomplicate things for now
-      if <- isProp expr then
-        sorry
-      else
-        throwError "proposition expected"
+  -- A simplified version of `Elab.Term.elabForall`
+  partial instance meansQP : Means Grammar.QuantPhrase Expr where
+    interpret
+    | Grammar.QuantPhrase.mk q np => do
+        let expr <- interpret' meansNPV np
+        let vars: Array Name <- np.vars.mapM interpret
+        -- `Elab.Term.ensureType` also tries to coerce into a type, but
+        -- lets not overcomplicate things for now
+        if <- isProp expr then
+          sorry
+        else
+          throwError "proposition expected"
 
-private partial def interpretStmt : Grammar.Stmt -> MetaM Expr := sorry
+  partial instance meansStmt : Means Grammar.Stmt Expr := sorry
 end
 
 def interpretAsm (asm : Grammar.Asm) : MetaM Int := sorry
 -- 1) Simply add the variable to the local context (without type) (say, `x : ?m`).
 -- 2) Run `MetaM` in that context in order to parse the statement/expression/...
 
-
--- This should yield a context of declarations.
-
+-- This should yield an environment of declarations.
 def interpretPara (p: Grammar.Para) : MetaM Unit := sorry
