@@ -57,6 +57,8 @@ def Foo.Bar.g := 5
 
 -- open Foo
 
+def g (i: Int) (j: Int) := i
+
 set_option trace.Meta.debug true
 
 variable (x : Int)
@@ -67,10 +69,15 @@ def test : MetaM Unit := do
   -- will probably be passed to the the `MetaM` monad when we call `#eval`. This also
   -- explains why the local context is empty.
   let t <- mkAppM `f #[mkNatLit 2]
-  let s <- getConstInfo `f
+  let g <- `g
+  let s <- getConstInfo `g
+  let fType <- s.type
 
   trace[Meta.debug] "t: {t}"
-  trace[Meta.debug] "s: {s.type}"
+  trace[Meta.debug] "s: {fType}"
+  trace[Meta.debug] "g is forall: {fType.isForall}"
+  trace[Meta.debug] "binding domain: {fType.bindingDomain!}"
+
   let t <- whnf t
   let type <- inferType t
 
@@ -165,6 +172,7 @@ def test : MetaM Unit := do
 variable (A B: Prop)
 
 def C := And A B
+#check A -> B
 
 universe u
 variable (S : Type u)
@@ -175,7 +183,7 @@ variable (S : Type u)
 
 #check forall α, Array α
 
-#check exists n, n = 0
+#check exists _, True
 
 #check Sort 0
 #check Sort u
@@ -218,3 +226,50 @@ def foo :=
   f 9 9
 
 #eval foo
+
+
+-- Can we work around the lack of argument type casting?
+def app (f : α -> β) (x: α) : β := f x
+
+private def mkFun (constName : Name) : MetaM (Expr × Expr) := do
+  let cinfo ← getConstInfo constName
+  let us ← cinfo.levelParams.mapM fun _ => mkFreshLevelMVar
+  let f := mkConst constName us
+  let fType := cinfo.instantiateTypeLevelParams us
+  return (f, fType)
+
+def trick : MetaM Unit := do
+  let u <- mkFreshLevelMVar
+  let type <- mkFreshExprMVar (mkSort u)
+  let inhabitant <- mkFreshExprMVar type
+
+  let isFive <- mkFun `isFive
+  let r <- mkAppM `app #[isFive.1, inhabitant]
+
+-- #eval trick
+-- No, this workaround does not work.
+
+private def app' (f: Expr) (arg: Expr) : MetaM Expr := do
+  let fType <- inferType f
+  let dom <- fType.bindingDomain!
+  let type <- inferType arg
+  trace[Meta.debug] "Expected type {dom}, got {type}"
+  unless <- isDefEq dom type do throwError "Expected type {dom}, got {type}"
+  mkApp f arg
+
+private def appN (ident: Name) (args: Array Expr) : MetaM Expr := do
+  args.foldlM (fun f arg => app' f arg) ((<- mkFun ident) |>.1)
+
+#check isFive
+
+def app2 : MetaM Unit := do
+  let u <- mkFreshLevelMVar
+  let type <- mkFreshExprMVar (mkSort u)
+  let inhabitant <- mkFreshExprMVar type
+
+  trace[Meta.debug] "type before: {type}"
+
+  let r <- appN `isFive #[inhabitant]
+  trace[Meta.debug] "type after: {type}"
+
+#eval app2

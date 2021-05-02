@@ -48,11 +48,37 @@ instance : Means Grammar.SgPl Name where
 
 instance : Means Grammar.VarSymbol Name where
   interpret (var: Grammar.VarSymbol) : Name := match var with
-  -- `mkFVar` might really be way to low level. Note that when
-  -- first declaring the variable, it needs to have a type and
-  -- then needs to get added to the context.
   | Grammar.VarSymbol.namedVar name => Name.mkSimple name
   | _ => sorry -- I think this rarely occurs
+
+
+-- Simple unifying application.
+-- * Doesn't deal with different argument types
+-- * No coercions
+-- * No propagating expected type for smarter coercions
+-- * No synthetic metavariables
+-- The lean application implementation is in `Elab/App.lean` and it has
+-- **a lot** more features.
+private def app (f: Expr) (arg: Expr) : MetaM Expr := do
+  let fType <- inferType f
+  let dom <- fType.bindingDomain!
+  let type <- inferType arg
+  unless <- isDefEq dom type do throwError "Expected type {dom}, got {type}"
+  mkApp f arg
+
+-- Copied from `AppBuilder.lean`
+private def mkFun (constName : Name) : MetaM (Expr × Expr) := do
+  let cinfo ← getConstInfo constName
+  let us ← cinfo.levelParams.mapM fun _ => mkFreshLevelMVar
+  let f := mkConst constName us
+  let fType := cinfo.instantiateTypeLevelParams us
+  return (f, fType)
+
+private def appN (ident: Name) (args: Array Expr) : MetaM Expr := do
+  args.foldlM (fun f arg => app f arg) ((<- mkFun ident) |>.1)
+
+private def interpretApp [m1: Means α Name] [m2: Means β Expr] (ident: α) (args: Array β) : MetaM Expr := do
+  appN (<- interpret ident) (<- args.mapM interpret)
 
 
 partial instance meansE: Means Grammar.Expr Expr where
@@ -61,12 +87,11 @@ partial instance meansE: Means Grammar.Expr Expr where
   | Grammar.Expr.int (Int.ofNat n) => mkNatLit n
   | Grammar.Expr.int _ => panic! "Integer literals can't be negative."
   -- The identifiers should be queried from the pattern definition tex labels.
-  -- We use `mkAppM` in order to enable stuff like typeclasses and implicit arguments
   -- (at least theoretically)
   | Grammar.Expr.mixfix symb args => do
     let args <- args.mapM <| interpret' meansE
     -- Patterns add indirection.
-    mkAppM sorry args
+    appN (<- interpret symb) args
   | Grammar.Expr.app _ _ => sorry
     -- We want a dumbed-down application here(no implicits).
     -- Typeclasses should be merely a **notational** construct - which in
@@ -75,18 +100,12 @@ partial instance meansE: Means Grammar.Expr Expr where
   | _ => sorry
 
 
-private def app [m1: Means α Name] [m2: Means β Expr] (ident: α) (args: Array β) : MetaM Expr := do
-  let args <- args.mapM interpret
-  let ident <- interpret ident
-  mkAppM ident args
-
 mutual
   -- Patterns add indirection.
-  -- TODO: Unify types
   partial instance meansF : Means Grammar.Fun Expr where
     interpret
     | Grammar.Fun.mk lexicalPhrase args =>
-        app (m2 := meansT) lexicalPhrase args
+        interpretApp (m2 := meansT) lexicalPhrase args
 
   partial instance meansT : Means Grammar.Term Expr where
     interpret
@@ -97,43 +116,61 @@ end
 
 instance [Means α Expr]: Means (Grammar.Noun α) Expr where
   interpret
-  | Grammar.Noun.mk sgPl args => app sgPl args
+  | Grammar.Noun.mk sgPl args => interpretApp sgPl args
 
 instance [Means α Expr]: Means (Grammar.Adj α) Expr where
   interpret
-  | Grammar.Adj.mk pat args => app pat args
+  | Grammar.Adj.mk pat args => interpretApp pat args
 
 instance [Means α Expr]: Means (Grammar.Verb α) Expr where
   interpret
-  | Grammar.Verb.mk sgPl args => app sgPl args
+  | Grammar.Verb.mk sgPl args => interpretApp sgPl args
 
--- `negate : (α -> Prop) -> (α -> Prop)` is in `Init.lean`!
--- Does this work without `mkAppM`?
-def negate (e: Expr) : MetaM Expr := mkAppM `negate #[e]
+def notProp (e: Expr) : MetaM Expr := appN `Not #[e]
 
-def conjunction (p1: Expr) (p2: Expr) : MetaM Expr :=
-  mkAppM `conjunction #[p1, p2]
+def andProp (p1: Expr) (p2: Expr) : MetaM Expr := appN `And #[p1, p2]
 
-def conjunctionN (ps: Array Expr) : MetaM Expr := do
-  ps.foldlM conjunction (<- mkConst `True)
+def andPropN (ps: Array Expr) : MetaM Expr := do
+  ps.foldlM andProp (<- mkConst `True)
 
-def disjunction (p1: Expr) (p2: Expr) : MetaM Expr :=
-  mkAppM `disjunction #[p1, p2]
+def implies (p1: Expr) (p2: Expr) : MetaM Expr :=
+  appN `implies #[p1, p2]
+
+-- `notPred : (α -> Prop) -> (α -> Prop)` is in `Predef.lean`!
+def notPred (e: Expr) : MetaM Expr := appN `notPred #[e]
+
+def andPred (p1: Expr) (p2: Expr) : MetaM Expr :=
+  appN `andPred #[p1, p2]
+
+def andPredN (ps: Array Expr) : MetaM Expr := do
+  ps.foldlM andPred (<- mkConst `truePred)
+
+def orPred (p1: Expr) (p2: Expr) : MetaM Expr :=
+  appN `orPred #[p1, p2]
+
+def universalQuant (fvars: Array Expr) (bound : Expr) (claim: Expr) : MetaM Expr := do
+  -- `implies` ensures that the input is actually a proposition.
+  mkForallFVars fvars (<- implies bound claim)
+
+def existentialQuant (fvars: Array Expr) (bound : Expr) (claim: Expr) : MetaM Expr := sorry
+
+def nonexistentialQuant (fvars: Array Expr) (bound : Expr) (claim: Expr) : MetaM Expr := do
+  appN `notProp #[<- existentialQuant fvars bound claim]
 
 instance : Means Grammar.VerbPhrase Expr where
   interpret
   | Grammar.VerbPhrase.verb verb => interpret verb
   | Grammar.VerbPhrase.adj adj => interpret adj
-  | Grammar.VerbPhrase.verbNot verb => do negate (<- interpret verb)
-  | Grammar.VerbPhrase.adjNot adj => do negate (<- interpret adj)
+  | Grammar.VerbPhrase.verbNot verb => do notPred (<- interpret verb)
+  | Grammar.VerbPhrase.adjNot adj => do notPred (<- interpret adj)
 
 instance : Means Grammar.AdjL Expr where
   interpret
-  | Grammar.AdjL.mk pat args => app pat args
+  | Grammar.AdjL.mk pat args => interpretApp pat args
 
 instance : Means Grammar.AdjR Expr where
   interpret
-  | Grammar.AdjR.adjR pat args => app pat args
+  | Grammar.AdjR.adjR pat args => interpretApp pat args
   | Grammar.AdjR.attrRThat verbPhrase => interpret verbPhrase
 
 
@@ -163,17 +200,19 @@ partial def inContext (vars: Array Name) (k: Array Expr -> MetaM α) : MetaM α 
 -- #eval test
 
 mutual
+  -- Ex: `[Aut(M) is] a simple group $G$ such that the order $G$ is odd.`
+  -- Returns a predicate.
   partial instance meansNP : Means Grammar.NounPhrase Expr where
     interpret
     | Grammar.NounPhrase.mk adjL noun varSymb? adjR stmt? => do
-      let base <- conjunctionN #[
+      let base <- andPredN #[
         <- interpret adjL,
         <- interpret noun,
         <- interpret adjR
         ]
       match varSymb?, stmt? with
       | _, none => base
-      | none, some stmt => conjunction base (<- interpret' meansStmt stmt)
+      | none, some stmt => andPred base (<- interpret' meansStmt stmt)
       | some varSymb, some stmt => do
         -- We abstract away our variable from `stmt` and then add the resulting predicate to our conjunction
         let u <- mkFreshLevelMVar
@@ -185,34 +224,51 @@ mutual
           -- unless <- isProp type do throwError "expected proposition, got {type}"
           mkLambdaFVars #[fvar] stmt
 
-        -- We need to make the types of `base` and `stmt` definitionally equal!!!
-        conjunction base stmt
+        andPred base stmt
 
+  -- This is a proposition that needs to be interpreted with the variable
+  -- symbols already in context. See example for `Stmt.quantPhrase`.
 
-    -- This should be an `and` and it should also abstract `stmt?` by
-    -- using `varSymb?`.
-
+  -- Warning: This behaves very differently from `NounPhrase`
   partial instance meansNPV : Means Grammar.NounPhraseVars Expr where
     interpret
-    | Grammar.NounPhraseVars.mk adjL noun varSymbs adjR stmt? => sorry
-    -- This should be an `and`
+    | Grammar.NounPhraseVars.mk adjL noun varSymbs adjR stmt? => do
+      let fvars <- varSymbs.mapM interpret
+      let fvars := fvars.map mkFVar
+      -- Apply the grammatical predictes to free variables
+      let nounProps <- fvars.mapM <| app (<- interpret noun)
+      let adjLProps <- fvars.mapM <| app (<- interpret adjL)
+      let adjRProps <- fvars.mapM <| app (<- interpret adjR)
 
-  -- A simplified version of `Elab.Term.elabForall`
-  partial instance meansQP : Means Grammar.QuantPhrase Expr where
+      let nounProp <- andPropN nounProps
+      let adjLProp <- andPropN adjLProps
+      let adjRProp <- andPropN adjRProps
+
+      match stmt? with
+      | some stmt => do
+        let stmt <- interpret' meansStmt stmt
+        andPropN #[nounProp, adjLProp, adjRProp, stmt]
+      | noun => andPropN #[nounProp, adjLProp, adjRProp]
+
+
+  partial instance meansStmt : Means Grammar.Stmt Expr where
     interpret
-    | Grammar.QuantPhrase.mk q np => do
+    -- Ex: `For all/some/no points $a,b$ we have $p(a,b)$`
+    | Grammar.Stmt.quantPhrase (Grammar.QuantPhrase.mk quantifier np) stmt => do
         let vars: Array Name <- np.vars.mapM interpret
 
         inContext vars fun fvars => do
-          let expr <- interpret' meansNPV np
+          let np <- interpret' meansNPV np
+          let stmt <- interpret' meansStmt stmt
           -- `Elab.Term.ensureType` also tries to coerce into a type, but
           -- lets not overcomplicate things for now
-          unless <- isProp expr do throwError "expected proposition, got {expr}"
+          unless <- isProp np <&&> isProp stmt do throwError "expected proposition, got {np}"
 
-          mkForallFVars fvars expr
-
-
-  partial instance meansStmt : Means Grammar.Stmt Expr := sorry
+          match quantifier with
+          | Grammar.Quantifier.universally => universalQuant fvars np stmt
+          | Grammar.Quantifier.existentially => existentialQuant fvars np stmt
+          | Grammar.Quantifier.nonexistentially => nonexistentialQuant fvars np stmt
+    | _ => sorry
 end
 
 

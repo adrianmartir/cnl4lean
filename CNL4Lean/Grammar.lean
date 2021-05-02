@@ -180,6 +180,8 @@ mutual
   inductive NounPhrase where
     | mk : AdjL -> Noun Term -> Option VarSymbol -> AdjR -> Option Stmt -> NounPhrase
 
+  -- Interprets to a `Prop` in a suitable context.
+  -- Warning: `NounPhrase` and `NounPhraseVars` get used in *very* different contexts.
   inductive NounPhraseVars where
     | mk : AdjL -> Noun Term -> Array VarSymbol -> AdjR -> Option Stmt -> NounPhraseVars
 
@@ -223,12 +225,6 @@ inductive Asm where
   -- First add variables with unknown typing declaration `x : ?m`. Then when
   -- interpreting the noun phrase, infer the type.
 
-  -- Note: We want to add a new section to the vocabulary about 'type aliases'. For something
-  -- like `an integer` to be directly mapped to `Int`. Then, when expanding `letNoun`, when we
-  -- encounter `$e$ an integer`, we run `isDefEqual typeOfe Int`, which should resolve
-  -- metavariables constraints. Leans powerful unification then also allows to add
-  -- where the types are only partially defined, like `Array ?m`. In fact, with this trick,
-  -- we can accept typing declarations anywhere in the grammatical tree.
   | letNoun : Array VarSymbol -> NounPhrase -> Asm
   -- A typing declaration.
   | letIn : Array VarSymbol -> Expr -> Asm
