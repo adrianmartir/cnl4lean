@@ -75,17 +75,18 @@ partial instance meansE: Means Grammar.Expr Expr where
   | _ => sorry
 
 
-private def interpretApp [m1: Means α Name] [m2: Means β Expr] (ident: α) (args: Array β) : MetaM Expr := do
+private def app [m1: Means α Name] [m2: Means β Expr] (ident: α) (args: Array β) : MetaM Expr := do
   let args <- args.mapM interpret
   let ident <- interpret ident
   mkAppM ident args
 
 mutual
   -- Patterns add indirection.
+  -- TODO: Unify types
   partial instance meansF : Means Grammar.Fun Expr where
     interpret
     | Grammar.Fun.mk lexicalPhrase args =>
-        interpretApp (m2 := meansT) lexicalPhrase args
+        app (m2 := meansT) lexicalPhrase args
 
   partial instance meansT : Means Grammar.Term Expr where
     interpret
@@ -96,15 +97,15 @@ end
 
 instance [Means α Expr]: Means (Grammar.Noun α) Expr where
   interpret
-  | Grammar.Noun.mk sgPl args => interpretApp sgPl args
+  | Grammar.Noun.mk sgPl args => app sgPl args
 
 instance [Means α Expr]: Means (Grammar.Adj α) Expr where
   interpret
-  | Grammar.Adj.mk pat args => interpretApp pat args
+  | Grammar.Adj.mk pat args => app pat args
 
 instance [Means α Expr]: Means (Grammar.Verb α) Expr where
   interpret
-  | Grammar.Verb.mk sgPl args => interpretApp sgPl args
+  | Grammar.Verb.mk sgPl args => app sgPl args
 
 -- `negate : (α -> Prop) -> (α -> Prop)` is in `Init.lean`!
 -- Does this work without `mkAppM`?
@@ -112,6 +113,9 @@ def negate (e: Expr) : MetaM Expr := mkAppM `negate #[e]
 
 def conjunction (p1: Expr) (p2: Expr) : MetaM Expr :=
   mkAppM `conjunction #[p1, p2]
+
+def conjunctionN (ps: Array Expr) : MetaM Expr := do
+  ps.foldlM conjunction (<- mkConst `True)
 
 def disjunction (p1: Expr) (p2: Expr) : MetaM Expr :=
   mkAppM `disjunction #[p1, p2]
@@ -125,26 +129,66 @@ instance : Means Grammar.VerbPhrase Expr where
 
 instance : Means Grammar.AdjL Expr where
   interpret
-  | Grammar.AdjL.mk pat args => interpretApp pat args
+  | Grammar.AdjL.mk pat args => app pat args
 
 instance : Means Grammar.AdjR Expr where
   interpret
-  | Grammar.AdjR.adjR pat args => interpretApp pat args
+  | Grammar.AdjR.adjR pat args => app pat args
   | Grammar.AdjR.attrRThat verbPhrase => interpret verbPhrase
 
 
 -- Eventually we want to support optional type annotations in binders (in `vars`)
-partial def inContext (vars: Array Name) (declaredVars: Array Expr) (k: Array Expr -> MetaM α) : MetaM α := do
-  let v ← mkFreshLevelMVar
-  let type <- mkFreshExprMVar (mkSort v)
-  -- We need to somehow recursively run `withLocalDecl` and gather the
-  -- free variables in `declaredVars`.
-  withLocalDecl vars[0] BinderInfo.default type k
+partial def inContext (vars: Array Name) (k: Array Expr -> MetaM α) : MetaM α :=
+  -- This rather messy code shows that higher order functions don't compose
+  -- too well.
+  let rec loop (i : Nat) (declaredVars : Array Expr) : MetaM α := do
+    if h : i < vars.size then
+      let name := vars.get ⟨i,h⟩
+      let u <- mkFreshLevelMVar
+      let type <- mkFreshExprMVar (mkSort u)
+      withLocalDecl name BinderInfo.default type fun fvar =>
+        loop (i+1) (declaredVars.push fvar)
+    else
+      k declaredVars
+  loop 0 #[]
+
+-- Wohoo, this works!!
+-- set_option trace.Meta.debug true
+-- def test : MetaM Unit := do
+--   let lc <- getLCtx
+--   trace[Meta.debug] "before: {lc.getFVarIds}"
+--   inContext #[Name.mkSimple "x", Name.mkSimple "y"] fun fvars => do
+--     let lc <- getLCtx
+--     trace[Meta.debug] "after: {lc.getFVarIds}"
+-- #eval test
 
 mutual
   partial instance meansNP : Means Grammar.NounPhrase Expr where
     interpret
-    | Grammar.NounPhrase.mk adjL noun varSymb? adjR stmt? => sorry
+    | Grammar.NounPhrase.mk adjL noun varSymb? adjR stmt? => do
+      let base <- conjunctionN #[
+        <- interpret adjL,
+        <- interpret noun,
+        <- interpret adjR
+        ]
+      match varSymb?, stmt? with
+      | _, none => base
+      | none, some stmt => conjunction base (<- interpret' meansStmt stmt)
+      | some varSymb, some stmt => do
+        -- We abstract away our variable from `stmt` and then add the resulting predicate to our conjunction
+        let u <- mkFreshLevelMVar
+        let varType <- mkFreshExprMVar (mkSort u)
+
+        let stmt <- withLocalDecl (<- interpret varSymb) BinderInfo.default varType fun fvar => do
+          let stmt <- interpret' meansStmt stmt
+          -- let type <- inferType stmt
+          -- unless <- isProp type do throwError "expected proposition, got {type}"
+          mkLambdaFVars #[fvar] stmt
+
+        -- We need to make the types of `base` and `stmt` definitionally equal!!!
+        conjunction base stmt
+
+
     -- This should be an `and` and it should also abstract `stmt?` by
     -- using `varSymb?`.
 
@@ -157,17 +201,20 @@ mutual
   partial instance meansQP : Means Grammar.QuantPhrase Expr where
     interpret
     | Grammar.QuantPhrase.mk q np => do
-        let expr <- interpret' meansNPV np
         let vars: Array Name <- np.vars.mapM interpret
-        -- `Elab.Term.ensureType` also tries to coerce into a type, but
-        -- lets not overcomplicate things for now
-        if <- isProp expr then
-          sorry
-        else
-          throwError "proposition expected"
+
+        inContext vars fun fvars => do
+          let expr <- interpret' meansNPV np
+          -- `Elab.Term.ensureType` also tries to coerce into a type, but
+          -- lets not overcomplicate things for now
+          unless <- isProp expr do throwError "expected proposition, got {expr}"
+
+          mkForallFVars fvars expr
+
 
   partial instance meansStmt : Means Grammar.Stmt Expr := sorry
 end
+
 
 def interpretAsm (asm : Grammar.Asm) : MetaM Int := sorry
 -- 1) Simply add the variable to the local context (without type) (say, `x : ?m`).

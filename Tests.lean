@@ -173,6 +173,48 @@ variable (S : Type u)
 #check (α: Type) -> Array α
 #check forall (α : Type u), Array α = Array S
 
+#check forall α, Array α
+
 #check exists n, n = 0
 
 #check Sort 0
+#check Sort u
+
+def X :=
+  let_fun f := 5
+  4
+
+def isFive x := x = 5
+
+-- New variable of metavariable type
+variable (n : _)
+#check isFive n
+
+def application : MetaM Unit := do
+  let u <- mkFreshLevelMVar
+  let type <- mkFreshExprMVar (mkSort u)
+  let inhabitant <- mkFreshExprMVar type
+
+  trace[Meta.debug] "type before: {type}"
+
+  -- We need to unify the types before being able to apply them!
+  -- Apparently `mkAppM` doesn't do that automatically.
+  -- This is relevant for us in the following way:
+  -- Say something desugars to `forall x => myFavouritePredicate(x)`, e.g.
+  -- something like a `QuantPhrase`.
+  let expectedType <- mkAppM `Nat #[]
+  unless <- isDefEq type expectedType do throwError "unexpected"
+  trace[Meta.debug] "type after: {type}"
+
+  let r <- mkAppM `isFive #[inhabitant]
+
+#eval application
+
+def i := fun x => List x
+#check i
+
+def foo :=
+  let f x y := 6
+  f 9 9
+
+#eval foo

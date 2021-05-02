@@ -62,6 +62,12 @@ inductive VarSymbol where
 inductive Expr where
   | var : VarSymbol -> Expr
   | int : Int -> Expr
+  -- Constants could be used to reference `.lean` library constants.
+  -- This generality makes interpreting `app` a bit hard - One could consider
+  -- just defining a Syntax object in `TermElab` and letting lean elaborate
+  -- it.
+
+  -- Then we get all the lean implicit argument magic for free.
   | const : Tok -> Expr
   | mixfix : Pattern -> Array Expr -> Expr
   | app : Expr -> Expr -> Expr
@@ -192,6 +198,7 @@ mutual
     | connected : Connective -> Stmt -> Stmt -> Stmt
     | quantPhrase : QuantPhrase -> Stmt -> Stmt
     | symbolicQuantified : QuantPhrase -> Array VarSymbol -> Bound -> Option Stmt -> Stmt -> Stmt
+    -- Perhaps we want to also allow purely type-theoretic statments, which we coerce to a proposition here
 end
 
 def NounPhrase.var : NounPhrase -> Option VarSymbol
@@ -239,6 +246,8 @@ inductive Asm where
 inductive Defn where
   -- This should behave like a telescope. I need to rerun `MetaM` after unpacking each
   -- and every assumption recursively.
+  -- Hm, do I need to coerce the result of `Stmt` to an actual `whnfForall`? Something like that
+  -- is done in `Elab.Term.ElabAppArgs`.
   | defn : Array Asm -> DefnHead -> Stmt -> Defn
   | fun' : Array Asm -> Fun -> Option Term -> Term -> Defn
 
