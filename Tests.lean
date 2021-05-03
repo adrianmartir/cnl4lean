@@ -185,6 +185,17 @@ variable (S : Type u)
 
 #check exists _, True
 
+-- This is a pi type,
+#check forall _, True
+-- not to be confused with the pi type constructor
+#check fun _ => True
+
+-- Existential quantifiers are (dependent) algebraic datatypes, because
+-- they are 'negative' types. This doesn't work for, say, forall.
+#check Exists (fun _ => True)
+
+#check Exists.intro (p := fun _ => True) 8 True.intro
+
 #check Sort 0
 #check Sort u
 
@@ -273,3 +284,37 @@ def app2 : MetaM Unit := do
   trace[Meta.debug] "type after: {type}"
 
 #eval app2
+
+
+def truePred (x: α) := True
+
+#check truePred
+
+def app3 : MetaM Unit := do
+  let tp <- mkFun `truePred
+  let type <- inferType tp.1
+
+  trace[Meta.debug] "signature: {type}"
+
+  let dom <- type.bindingDomain!
+  trace[Meta.debug] "domain: {dom}"
+
+  -- The fact that `appN` does explicitly apply implicit binders
+  -- is a problem.
+  let a <- appN `truePred <| #[mkConst `Nat]
+  let type <- inferType a
+  trace[Meta.debug] "signature: {type}"
+
+
+#eval app3
+
+def k {α: Type u} (x : α) {β: Type v} (b : β) := 4
+
+#check k 4 5
+
+class Holds : Prop where
+  construct : True
+
+def j {p: True} : Nat := 4
+
+-- #eval Nat.add j 6

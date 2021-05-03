@@ -148,11 +148,19 @@ def andPredN (ps: Array Expr) : MetaM Expr := do
 def orPred (p1: Expr) (p2: Expr) : MetaM Expr :=
   appN `orPred #[p1, p2]
 
+-- For the quantifiers, we assume that we are abstracting free variables that
+-- already are in context.
+-- `For all green gadgets $x$ we have $p$.`
+-- -> `∀x. green(x) → p`
 def universalQuant (fvars: Array Expr) (bound : Expr) (claim: Expr) : MetaM Expr := do
   -- `implies` ensures that the input is actually a proposition.
   mkForallFVars fvars (<- implies bound claim)
 
-def existentialQuant (fvars: Array Expr) (bound : Expr) (claim: Expr) : MetaM Expr := sorry
+-- `For some blue gadget $x$ we have $p$.`
+-- -> `∃x. blue(x) ∧ p`
+def existentialQuant (fvars: Array Expr) (bound : Expr) (claim: Expr) : MetaM Expr := do
+  let typeFamily <- mkLambdaFVars fvars <| <- andProp bound claim
+  appN `Exists #[typeFamily]
 
 def nonexistentialQuant (fvars: Array Expr) (bound : Expr) (claim: Expr) : MetaM Expr := do
   appN `notProp #[<- existentialQuant fvars bound claim]
@@ -199,9 +207,14 @@ partial def inContext (vars: Array Name) (k: Array Expr -> MetaM α) : MetaM α 
 --     trace[Meta.debug] "after: {lc.getFVarIds}"
 -- #eval test
 
+instance : Means Grammar.Bound Expr where
+  interpret
+  | Grammar.Bound.unbounded => sorry
+  | Grammar.Bound.bounded sgn relator expr => sorry
+
 mutual
   -- Ex: `[Aut(M) is] a simple group $G$ such that the order $G$ is odd.`
-  -- Returns a predicate.
+  -- Returns a predicate `?m -> Prop`.
   partial instance meansNP : Means Grammar.NounPhrase Expr where
     interpret
     | Grammar.NounPhrase.mk adjL noun varSymb? adjR stmt? => do
@@ -260,14 +273,13 @@ mutual
         inContext vars fun fvars => do
           let np <- interpret' meansNPV np
           let stmt <- interpret' meansStmt stmt
-          -- `Elab.Term.ensureType` also tries to coerce into a type, but
-          -- lets not overcomplicate things for now
-          unless <- isProp np <&&> isProp stmt do throwError "expected proposition, got {np}"
+          -- We don't check that these are propositions since the `[..]Quant` functions already implicitly check that.
 
           match quantifier with
           | Grammar.Quantifier.universally => universalQuant fvars np stmt
           | Grammar.Quantifier.existentially => existentialQuant fvars np stmt
           | Grammar.Quantifier.nonexistentially => nonexistentialQuant fvars np stmt
+    | Grammar.Stmt.symbolicQuantified (Grammar.QuantPhrase.mk quantifier np) varSymbs bound suchThat? claim => sorry
     | _ => sorry
 end
 
