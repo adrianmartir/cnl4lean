@@ -2,11 +2,11 @@
   "nodes": {
     "flake-utils": {
       "locked": {
-        "lastModified": 1618868421,
-        "narHash": "sha256-vyoJhLV6cJ8/tWz+l9HZLIkb9Rd9esE7p+0RL6zDR6Y=",
+        "lastModified": 1619345332,
+        "narHash": "sha256-qHnQkEp1uklKTpx3MvKtY6xzgcqXDsz5nLilbbuL+3A=",
         "owner": "numtide",
         "repo": "flake-utils",
-        "rev": "eed214942bcfb3a8cc09eb3b28ca7d7221e44a94",
+        "rev": "2ebf2558e5bf978c7fb8ea927dfaed8fefab2e28",
         "type": "github"
       },
       "original": {
@@ -41,11 +41,11 @@
         "temci": "temci"
       },
       "locked": {
-        "lastModified": 1619000462,
-        "narHash": "sha256-F0tg6qfDvp9q7F9QsNXLESwZgbCC5j9GA9M5AtrU6DY=",
+        "lastModified": 1620100943,
+        "narHash": "sha256-TUlrqReIkesk7t5rjUkKFPAmXQuM1tVPrGOsQygo9UM=",
         "owner": "leanprover",
         "repo": "lean4",
-        "rev": "20cbb4389a4c99d818c466da831f961b25f61e36",
+        "rev": "8102f407b62f6fc860f0af60d8146d4a65d1b217",
         "type": "github"
       },
       "original": {
