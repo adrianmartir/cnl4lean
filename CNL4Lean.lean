@@ -2,6 +2,7 @@
 import Lean
 import CNL4Lean.Grammar
 import CNL4Lean.Deserialize
+-- import CNL4Lean.AppBuilder
 
 
 open Lean

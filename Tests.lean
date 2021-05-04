@@ -51,7 +51,7 @@ def defaultEnvironment : Environment := arbitrary
 
 -- Question: Why is the local context immutable in MetaM?
 
-def f {α} [Add α] (x:α) : List α := [x,x,x+x]
+def f [Add α] (x:α) : List α := [x,x,x+x]
 
 def Foo.Bar.g := 5
 
@@ -70,7 +70,8 @@ def test : MetaM Unit := do
   -- explains why the local context is empty.
   let t <- mkAppM `f #[mkNatLit 2]
   let g <- `g
-  let s <- getConstInfo `g
+  let s <- getConstInfo `f
+  trace[Meta.debug] "level param: {s.levelParams}"
   let fType <- s.type
 
   trace[Meta.debug] "t: {t}"
@@ -207,7 +208,64 @@ def isFive x := x = 5
 
 -- New variable of metavariable type
 variable (n : _)
+#check n
 #check isFive n
+
+set_option trace.Meta.appBuilder true
+
+private def mkAppMFinal (methodName : Name) (f : Expr) (args : Array Expr) (instMVars : Array MVarId) : MetaM Expr := do
+  instMVars.forM fun mvarId => do
+    let mvarDecl ← getMVarDecl mvarId
+    let mvarVal  ← synthInstance mvarDecl.type
+    assignExprMVar mvarId mvarVal
+  let result ← instantiateMVars (mkAppN f args)
+  return result
+
+private partial def mkAppMArgs (f : Expr) (fType : Expr) (xs : Array Expr) : MetaM Expr :=
+  let rec loop (type : Expr) (i : Nat) (j : Nat) (args : Array Expr) (instMVars : Array MVarId) : MetaM Expr := do
+    if i >= xs.size then
+      mkAppMFinal `mkAppM f args instMVars
+    else match type with
+      | Expr.forallE n d b c =>
+        let d  := d.instantiateRevRange j args.size args
+        match c.binderInfo with
+        | BinderInfo.implicit     =>
+          let mvar ← mkFreshExprMVar d MetavarKind.natural n
+          loop b i j (args.push mvar) instMVars
+        | BinderInfo.instImplicit =>
+          let mvar ← mkFreshExprMVar d MetavarKind.synthetic n
+          loop b i j (args.push mvar) (instMVars.push mvar.mvarId!)
+        | _ =>
+          let x := xs[i]
+          let xType ← inferType x
+          trace[Meta.appBuilder] m!"x type: {xType}, expected type: {d}"
+          if (← isDefEq d xType) then
+            trace[Meta.appBuilder] "Yes!"
+            loop b (i+1) j (args.push x) instMVars
+          else
+            -- throwError m!"Application mismatch, we are all going to die."
+            throwAppTypeMismatch (mkAppN f args) x
+      | type =>
+        let type := type.instantiateRevRange j args.size args
+        let type ← whnfD type
+        if type.isForall then
+          loop type i args.size args instMVars
+        else
+          throwError m!"too many explicit arguments provided to{indentExpr f}\narguments{indentD xs}"
+  loop fType 0 0 #[] #[]
+
+private def mkFun (constName : Name) : MetaM (Expr × Expr) := do
+  let cinfo ← getConstInfo constName
+  let us ← cinfo.levelParams.mapM fun _ => mkFreshLevelMVar
+  let f := mkConst constName us
+  let fType := cinfo.instantiateTypeLevelParams us
+  return (f, fType)
+
+def mkAppM' (constName : Name) (xs : Array Expr) : MetaM Expr := do
+    let (f, fType) ← mkFun constName
+    let r ← mkAppMArgs f fType xs
+    trace[Meta.appBuilder] "constName: {constName}, xs: {xs}, result: {r}"
+    return r
 
 def application : MetaM Unit := do
   let u <- mkFreshLevelMVar
@@ -219,13 +277,11 @@ def application : MetaM Unit := do
   -- We need to unify the types before being able to apply them!
   -- Apparently `mkAppM` doesn't do that automatically.
   -- This is relevant for us in the following way:
-  -- Say something desugars to `forall x => myFavouritePredicate(x)`, e.g.
-  -- something like a `QuantPhrase`.
-  let expectedType <- mkAppM `Nat #[]
-  unless <- isDefEq type expectedType do throwError "unexpected"
-  trace[Meta.debug] "type after: {type}"
+  -- let expectedType <- mkAppM `Nat #[]
+  -- unless <- isDefEq type expectedType do throwError "unexpected"
+  -- trace[Meta.debug] "type after: {type}"
 
-  let r <- mkAppM `isFive #[inhabitant]
+  let r <- mkAppM' `isFive #[inhabitant]
 
 #eval application
 
@@ -238,27 +294,6 @@ def foo :=
 
 #eval foo
 
-
--- Can we work around the lack of argument type casting?
-def app (f : α -> β) (x: α) : β := f x
-
-private def mkFun (constName : Name) : MetaM (Expr × Expr) := do
-  let cinfo ← getConstInfo constName
-  let us ← cinfo.levelParams.mapM fun _ => mkFreshLevelMVar
-  let f := mkConst constName us
-  let fType := cinfo.instantiateTypeLevelParams us
-  return (f, fType)
-
-def trick : MetaM Unit := do
-  let u <- mkFreshLevelMVar
-  let type <- mkFreshExprMVar (mkSort u)
-  let inhabitant <- mkFreshExprMVar type
-
-  let isFive <- mkFun `isFive
-  let r <- mkAppM `app #[isFive.1, inhabitant]
-
--- #eval trick
--- No, this workaround does not work.
 
 private def app' (f: Expr) (arg: Expr) : MetaM Expr := do
   let fType <- inferType f

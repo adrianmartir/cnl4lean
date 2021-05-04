@@ -1,5 +1,6 @@
 
 import CNL4Lean.Grammar
+import CNL4Lean.AppBuilder
 import Lean
 -- The goal is to create a dummy file and to write all the natural constructs to it.
 -- Then, can I somehow make the environment into an `.olean` file? I am not sure how
@@ -66,7 +67,7 @@ private def app (f: Expr) (arg: Expr) : MetaM Expr := do
   unless <- isDefEq dom type do throwError "Expected type {dom}, got {type}"
   mkApp f arg
 
--- Copied from `AppBuilder.lean`
+-- Copied from `AppBuilder.lean`. Instantiates universe parameters.
 private def mkFun (constName : Name) : MetaM (Expr × Expr) := do
   let cinfo ← getConstInfo constName
   let us ← cinfo.levelParams.mapM fun _ => mkFreshLevelMVar
