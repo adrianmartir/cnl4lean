@@ -2,7 +2,7 @@
 import Lean
 import CNL4Lean.Grammar
 import CNL4Lean.Deserialize
--- import CNL4Lean.AppBuilder
+import CNL4Lean.AppBuilder
 
 
 open Lean
@@ -20,7 +20,7 @@ def json : DeserializeM Json := do
     | Except.ok json => json
     | Except.error msg => throw (parsingError msg)
 
-def getPara : DeserializeM Para := json >>= deserialize
+def getPara : DeserializeM Grammar.Para := json >>= deserialize
 -- This should simply be lowered to IO and then run.
 
 def f : IO DeserializationError := do

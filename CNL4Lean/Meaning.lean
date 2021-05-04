@@ -53,33 +53,8 @@ instance : Means Grammar.VarSymbol Name where
   | _ => sorry -- I think this rarely occurs
 
 
--- Simple unifying application.
--- * Doesn't deal with different argument types
--- * No coercions
--- * No propagating expected type for smarter coercions
--- * No synthetic metavariables
--- The lean application implementation is in `Elab/App.lean` and it has
--- **a lot** more features.
-private def app (f: Expr) (arg: Expr) : MetaM Expr := do
-  let fType <- inferType f
-  let dom <- fType.bindingDomain!
-  let type <- inferType arg
-  unless <- isDefEq dom type do throwError "Expected type {dom}, got {type}"
-  mkApp f arg
-
--- Copied from `AppBuilder.lean`. Instantiates universe parameters.
-private def mkFun (constName : Name) : MetaM (Expr × Expr) := do
-  let cinfo ← getConstInfo constName
-  let us ← cinfo.levelParams.mapM fun _ => mkFreshLevelMVar
-  let f := mkConst constName us
-  let fType := cinfo.instantiateTypeLevelParams us
-  return (f, fType)
-
-private def appN (ident: Name) (args: Array Expr) : MetaM Expr := do
-  args.foldlM (fun f arg => app f arg) ((<- mkFun ident) |>.1)
-
 private def interpretApp [m1: Means α Name] [m2: Means β Expr] (ident: α) (args: Array β) : MetaM Expr := do
-  appN (<- interpret ident) (<- args.mapM interpret)
+  mkAppM' (<- interpret ident) (<- args.mapM interpret)
 
 
 partial instance meansE: Means Grammar.Expr Expr where
@@ -92,7 +67,7 @@ partial instance meansE: Means Grammar.Expr Expr where
   | Grammar.Expr.mixfix symb args => do
     let args <- args.mapM <| interpret' meansE
     -- Patterns add indirection.
-    appN (<- interpret symb) args
+    mkAppM' (<- interpret symb) args
   | Grammar.Expr.app _ _ => sorry
     -- We want a dumbed-down application here(no implicits).
     -- Typeclasses should be merely a **notational** construct - which in
@@ -127,27 +102,27 @@ instance [Means α Expr]: Means (Grammar.Verb α) Expr where
   interpret
   | Grammar.Verb.mk sgPl args => interpretApp sgPl args
 
-def notProp (e: Expr) : MetaM Expr := appN `Not #[e]
+def notProp (e: Expr) : MetaM Expr := mkAppM' `Not #[e]
 
-def andProp (p1: Expr) (p2: Expr) : MetaM Expr := appN `And #[p1, p2]
+def andProp (p1: Expr) (p2: Expr) : MetaM Expr := mkAppM' `And #[p1, p2]
 
 def andPropN (ps: Array Expr) : MetaM Expr := do
   ps.foldlM andProp (<- mkConst `True)
 
 def implies (p1: Expr) (p2: Expr) : MetaM Expr :=
-  appN `implies #[p1, p2]
+  mkAppM' `implies #[p1, p2]
 
 -- `notPred : (α -> Prop) -> (α -> Prop)` is in `Predef.lean`!
-def notPred (e: Expr) : MetaM Expr := appN `notPred #[e]
+def notPred (e: Expr) : MetaM Expr := mkAppM' `notPred #[e]
 
 def andPred (p1: Expr) (p2: Expr) : MetaM Expr :=
-  appN `andPred #[p1, p2]
+  mkAppM' `andPred #[p1, p2]
 
 def andPredN (ps: Array Expr) : MetaM Expr := do
   ps.foldlM andPred (<- mkConst `truePred)
 
 def orPred (p1: Expr) (p2: Expr) : MetaM Expr :=
-  appN `orPred #[p1, p2]
+  mkAppM' `orPred #[p1, p2]
 
 -- For the quantifiers, we assume that we are abstracting free variables that
 -- already are in context.
@@ -161,10 +136,10 @@ def universalQuant (fvars: Array Expr) (bound : Expr) (claim: Expr) : MetaM Expr
 -- -> `∃x. blue(x) ∧ p`
 def existentialQuant (fvars: Array Expr) (bound : Expr) (claim: Expr) : MetaM Expr := do
   let typeFamily <- mkLambdaFVars fvars <| <- andProp bound claim
-  appN `Exists #[typeFamily]
+  mkAppM' `Exists #[typeFamily]
 
 def nonexistentialQuant (fvars: Array Expr) (bound : Expr) (claim: Expr) : MetaM Expr := do
-  appN `notProp #[<- existentialQuant fvars bound claim]
+  mkAppM' `notProp #[<- existentialQuant fvars bound claim]
 
 instance : Means Grammar.VerbPhrase Expr where
   interpret

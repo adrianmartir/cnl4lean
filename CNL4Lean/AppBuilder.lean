@@ -70,3 +70,30 @@ def mkAppM' (constName : Name) (xs : Array Expr) : MetaM Expr := do
     let r ← mkAppMArgs f fType xs
     trace[Meta.appBuilder] "constName: {constName}, xs: {xs}, result: {r}"
     return r
+
+
+-- OLD CODE:
+-- Simple unifying application.
+-- * Doesn't deal with different argument types
+-- * No coercions
+-- * No propagating expected type for smarter coercions
+-- * No synthetic metavariables
+-- The lean application implementation is in `Elab/App.lean` and it has
+-- **a lot** more features.
+def app (f: Expr) (arg: Expr) : MetaM Expr := do
+  let fType <- inferType f
+  let dom <- fType.bindingDomain!
+  let type <- inferType arg
+  unless <- isDefEq dom type do throwError "Expected type {dom}, got {type}"
+  mkApp f arg
+
+-- -- Copied from `AppBuilder.lean`. Instantiates universe parameters.
+-- private def mkFun (constName : Name) : MetaM (Expr × Expr) := do
+--   let cinfo ← getConstInfo constName
+--   let us ← cinfo.levelParams.mapM fun _ => mkFreshLevelMVar
+--   let f := mkConst constName us
+--   let fType := cinfo.instantiateTypeLevelParams us
+--   return (f, fType)
+
+-- private def appN (ident: Name) (args: Array Expr) : MetaM Expr := do
+--   args.foldlM (fun f arg => app f arg) ((<- mkFun ident) |>.1)
