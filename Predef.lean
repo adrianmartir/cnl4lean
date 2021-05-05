@@ -2,13 +2,12 @@
 -- This file contains the builtin lean constants.
 -- Somehow disable prelude when reading this?
 
-def notPred (p: α -> Prop) (x: α): Prop := Not (p x)
+def xor (p1: Prop) (p2: Prop) : Prop :=
+  Or (And p1 (Not p2))
+    (And (Not p1) p2)
 
-def andPred (p1 : α -> Prop) (p2 : α -> Prop) (x: α) := And (p1 x) (p2 x)
-
-def orPred (p1 : α -> Prop) (p2 : α -> Prop) (x: α) := Or (p1 x) (p2 x)
-
-def truePred (x: α) := True
+def nor (p1: Prop) (p2: Prop) : Prop :=
+  Not (Or p1 p2)
 
 -- We can put the pattern -> lean translations here for now.
 -- Maybe later I have a better idea.

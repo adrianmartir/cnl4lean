@@ -104,15 +104,13 @@ mutual
   -- Actually, that is not true. If I define the semantics
   -- by using 'patterns as functions', then the patterns
   -- must add indirection, so this doesn't work. At some point we
-  -- probably want patterns(for `Expr` and for `Fun`) that don't add indirection, so this
+  -- may want patterns(for `Expr` and for `Fun`) that don't add indirection, so this
   -- idea is possible.
 
   -- e.g. "A functor from $C$ to $D$."
   inductive Fun where
     | mk : SgPl -> Array Term -> Fun
 
-  -- Note: This does not allow putting functional nouns inside symbolic
-  -- expressions
   inductive Term where
     | expr : Expr -> Term   -- Symbolic version
     | function : Fun -> Term -- Version with words

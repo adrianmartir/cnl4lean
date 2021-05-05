@@ -46,6 +46,13 @@ instance : Means Grammar.Pattern Name where
 instance : Means Grammar.SgPl Name where
   interpret pat := interpret pat.sg
 
+instance : Means Grammar.Relator Name where
+  interpret rel := toString rel ++ "rel" |> Name.mkSimple
+
+instance : Means Grammar.SymbolicPredicate Name where
+  interpret
+  | Grammar.SymbolicPredicate.mk s _ =>  toString s ++ "sPred" |> Name.mkSimple
+
 instance : Means Grammar.VarSymbol Name where
   interpret (var: Grammar.VarSymbol) : Name := match var with
   | Grammar.VarSymbol.namedVar name => Name.mkSimple name
@@ -107,28 +114,54 @@ def not (e: Expr) : MetaM Expr := appN `Not #[e]
 
 def and (p1: Expr) (p2: Expr) : MetaM Expr := appN `And #[p1, p2]
 
+def or (p1: Expr) (p2: Expr) : MetaM Expr := appN `Or #[p1, p2]
+
 def andN (ps: Array Expr) : MetaM Expr := do
   ps.foldlM and (<- mkConst `True)
 
 def implies (p1: Expr) (p2: Expr) : MetaM Expr :=
   appN `implies #[p1, p2]
 
--- For the quantifiers, we assume that we are abstracting free variables that
--- already are in context.
--- `For all green gadgets $x$ we have $p$.`
--- -> `∀x. green(x) → p`
-def universalQuant (fvars: Array Expr) (bound : Expr) (claim: Expr) : MetaM Expr := do
-  -- `implies` ensures that the input is actually a proposition.
-  mkForallFVars fvars (<- implies bound claim)
+def iff (p1: Expr) (p2: Expr) : MetaM Expr :=
+  appN `Iff #[p1, p2]
 
--- `For some blue gadget $x$ we have $p$.`
--- -> `∃x. blue(x) ∧ p`
-def existentialQuant (fvars: Array Expr) (bound : Expr) (claim: Expr) : MetaM Expr := do
-  let typeFamily <- mkLambdaFVars fvars <| <- and bound claim
-  appN `Exists #[typeFamily]
+def xor (p1: Expr) (p2: Expr) : MetaM Expr :=
+  appN `xor #[p1, p2]
 
-def nonexistentialQuant (fvars: Array Expr) (bound : Expr) (claim: Expr) : MetaM Expr := do
-  appN `not #[<- existentialQuant fvars bound claim]
+def nor (p1: Expr) (p2: Expr) : MetaM Expr :=
+  appN `nor #[p1, p2]
+
+instance meansSgn: Means Grammar.Sign (Expr -> MetaM Expr) where
+  interpret
+  | Grammar.Sign.positive => pure
+  | Grammar.Sign.negative => not
+
+private def interpretRel (lhs: Array Grammar.Expr) (sgn : Grammar.Sign) (rel: Grammar.Relator) (rhs: Array Grammar.Expr): MetaM Expr := do
+    let relator := interpret rel
+    let lhs <- lhs.mapM interpret
+    let rhs <- rhs.mapM interpret
+    let x <- appN relator (Array.append lhs rhs)
+
+    interpret' meansSgn sgn x
+
+partial instance meansC : Means Grammar.Chain (MetaM Expr) where
+  interpret
+  | Grammar.Chain.chainBase lhs sgn rel rhs =>
+    interpretRel lhs sgn rel rhs
+  | Grammar.Chain.chainCons lhs sgn rel tail => do
+    let head <- match tail with
+    | Grammar.Chain.chainBase rhs _ _ _ =>
+      interpretRel lhs sgn rel rhs
+    | Grammar.Chain.chainCons rhs _ _ _ =>
+      interpretRel lhs sgn rel rhs
+    let tail <- interpret' meansC tail
+
+    and head tail
+
+instance : Means Grammar.Formula (MetaM Expr) where
+  interpret
+  | Grammar.Formula.chain chain => interpret chain
+  | Grammar.Formula.predicate p args => do appN (interpret p) (<- args.mapM interpret)
 
 mutual
   -- Patterns add indirection.
@@ -209,6 +242,37 @@ partial def inContext (vars: Array Name) (k: Array Expr -> MetaM α) : MetaM α 
 --     trace[Meta.debug] "after: {lc.getFVarIds}"
 -- #eval test
 
+instance meansCon: Means Grammar.Connective (Expr -> Expr -> MetaM Expr) where
+  interpret
+  | Grammar.Connective.conjunction => and
+  | Grammar.Connective.disjunction => or
+  | Grammar.Connective.implication => implies
+  | Grammar.Connective.equivalence => iff
+  | Grammar.Connective.exclusiveOr => xor
+  | Grammar.Connective.negatedDisjunction => nor
+
+
+instance meansQuant: Means Grammar.Quantifier (Array Expr -> Expr -> Expr -> MetaM Expr) where
+  interpret
+  -- For the quantifiers, we assume that we are abstracting free variables that
+  -- already are in context.
+  -- `For all green gadgets $x$ we have $p$.`
+  -- -> `∀x. green(x) → p`
+  | Grammar.Quantifier.universally => fun fvars bound claim => do
+  -- `implies` ensures that the input is actually a proposition.
+    mkForallFVars fvars (<- implies bound claim)
+
+  -- `For some blue gadget $x$ we have $p$.`
+  -- -> `∃x. blue(x) ∧ p`
+  | Grammar.Quantifier.existentially => fun fvars bound claim => do
+    let typeFamily <- mkLambdaFVars fvars <| <- and bound claim
+    appN `Exists #[typeFamily]
+
+  | Grammar.Quantifier.nonexistentially => fun fvars bound claim => do
+    let typeFamily <- mkLambdaFVars fvars <| <- and bound claim
+    not (<- appN `Exists #[typeFamily])
+
+
 instance : Means Grammar.Bound (MetaM Expr) where
   interpret
   | Grammar.Bound.unbounded => sorry
@@ -267,23 +331,32 @@ mutual
 
   partial instance meansStmt : Means Grammar.Stmt (MetaM Expr) where
     interpret
+    | Grammar.Stmt.formula f => interpret f
+    | Grammar.Stmt.verbPhrase term vp => do
+      let term <- interpret term
+      meansVP.interpret vp term
+
     -- Ex: `[Aut(M) is] a simple group $G$ such that the order $G$ is odd.`
     | Grammar.Stmt.noun term np => do
       let term <- interpret term
-      interpret' meansNP np term
+      meansNP.interpret np term
+    | Grammar.Stmt.neg stmt => do not (<- interpret' meansStmt stmt)
+    | Grammar.Stmt.connected connective stmt1 stmt2 => do
+      let stmt1 <- interpret' meansStmt stmt1
+      let stmt2 <- interpret' meansStmt stmt2
+      meansCon.interpret connective stmt1 stmt2
+
     -- Ex: `For all/some/no points $a,b$ we have $p(a,b)$.`
     | Grammar.Stmt.quantPhrase (Grammar.QuantPhrase.mk quantifier np) stmt => do
         let varSymbs := np.vars.map interpret
 
         inContext varSymbs fun fvars => do
-          let np <- interpret' meansNPV np
+          let np <- meansNPV.interpret np
           let stmt <- interpret' meansStmt stmt
           -- We don't check that these are propositions since the quantification functions already implicitly check that.
 
-          match quantifier with
-          | Grammar.Quantifier.universally => universalQuant fvars np stmt
-          | Grammar.Quantifier.existentially => existentialQuant fvars np stmt
-          | Grammar.Quantifier.nonexistentially => nonexistentialQuant fvars np stmt
+          meansQuant.interpret quantifier fvars np stmt
+
     | Grammar.Stmt.symbolicQuantified (Grammar.QuantPhrase.mk quantifier np) varSymbs bound suchThat? claim => sorry
     | _ => sorry
 end

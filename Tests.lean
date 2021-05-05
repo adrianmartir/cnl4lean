@@ -352,4 +352,6 @@ class Holds : Prop where
 
 def j {p: True} : Nat := 4
 
+
+#check implies
 -- #eval Nat.add j 6
