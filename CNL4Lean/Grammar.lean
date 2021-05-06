@@ -197,7 +197,7 @@ mutual
     | exists' : NounPhraseVars -> Stmt
     | connected : Connective -> Stmt -> Stmt -> Stmt
     | quantPhrase : QuantPhrase -> Stmt -> Stmt
-    | symbolicQuantified : QuantPhrase -> Array VarSymbol -> Bound -> Option Stmt -> Stmt -> Stmt
+    | symbolicQuantified : Quantifier -> Array VarSymbol -> Bound -> Option Stmt -> Stmt -> Stmt
     -- Perhaps we want to also allow purely type-theoretic statments, which we coerce to a proposition here
 end
 

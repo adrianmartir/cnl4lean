@@ -140,9 +140,14 @@ private def interpretRel (lhs: Array Grammar.Expr) (sgn : Grammar.Sign) (rel: Gr
     let relator := interpret rel
     let lhs <- lhs.mapM interpret
     let rhs <- rhs.mapM interpret
-    let x <- appN relator (Array.append lhs rhs)
 
-    interpret' meansSgn sgn x
+    let mut acc := mkConst `True
+    for l in lhs do
+      for r in rhs do
+        let head <- appN relator #[l, r]
+        let acc <- and head acc
+
+    interpret' meansSgn sgn acc
 
 partial instance meansC : Means Grammar.Chain (MetaM Expr) where
   interpret
@@ -282,10 +287,11 @@ instance meansQuant: Means Grammar.Quantifier (Array Expr -> Expr -> Expr -> Met
     not exists'
 
 
-instance : Means Grammar.Bound (MetaM Expr) where
+instance : Means Grammar.Bound (Expr -> MetaM Expr) where
   interpret
-  | Grammar.Bound.unbounded => sorry
-  | Grammar.Bound.bounded sgn relator expr => sorry
+  | Grammar.Bound.unbounded => fun e => mkConst `True
+  | Grammar.Bound.bounded sgn relator expr => fun e => do
+    appN (interpret relator) #[<- interpret expr, e]
 
 mutual
   -- Ex: `[Aut(M) is] a simple group $G$ such that the order $G$ is odd.`
@@ -371,8 +377,13 @@ mutual
 
           meansQuant.interpret quantifier fvars np stmt
 
-    -- Ex: `for all $d$ such that $d\divides m, n$, we have that $d = 1$.`
-    | Grammar.Stmt.symbolicQuantified (Grammar.QuantPhrase.mk quantifier np) varSymbs bound suchThat? claim => sorry
+    -- Ex: `for all $d ∈ \even$ such that $d\divides m, n$, we have that $d = 1$.`
+    | Grammar.Stmt.symbolicQuantified quantifiier varSymbs bound suchThat? claim => do
+      let varSymbs := varSymbs.map interpret
+
+      inContext varSymbs fun fvars => do
+
+      sorry
 end
 
 
