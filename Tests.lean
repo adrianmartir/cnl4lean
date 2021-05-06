@@ -185,6 +185,7 @@ variable (S : Type u)
 #check forall α, Array α
 
 #check exists _, True
+#check exists _ _, True
 
 -- This is a pi type,
 #check forall _, True
@@ -194,6 +195,7 @@ variable (S : Type u)
 -- Existential quantifiers are (dependent) algebraic datatypes, because
 -- they are 'negative' types. This doesn't work for, say, forall.
 #check Exists (fun _ => True)
+-- Note that we can't directly use `Exists` for our interpretations since we need to existentially quantify over multiple variables.
 
 #check Exists.intro (p := fun _ => True) 8 True.intro
 
@@ -355,3 +357,7 @@ def j {p: True} : Nat := 4
 
 #check implies
 -- #eval Nat.add j 6
+
+#check exists x y, And x y
+#check Exists fun x => (Exists fun y => And x y)
+#check Exists

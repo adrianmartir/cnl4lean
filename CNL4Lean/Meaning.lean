@@ -232,16 +232,6 @@ partial def inContext (vars: Array Name) (k: Array Expr -> MetaM α) : MetaM α 
       k declaredVars
   loop 0 #[]
 
--- Wohoo, this works!!
--- set_option trace.Meta.debug true
--- def test : MetaM Unit := do
---   let lc <- getLCtx
---   trace[Meta.debug] "before: {lc.getFVarIds}"
---   inContext #[Name.mkSimple "x", Name.mkSimple "y"] fun fvars => do
---     let lc <- getLCtx
---     trace[Meta.debug] "after: {lc.getFVarIds}"
--- #eval test
-
 instance meansCon: Means Grammar.Connective (Expr -> Expr -> MetaM Expr) where
   interpret
   | Grammar.Connective.conjunction => and
@@ -251,6 +241,26 @@ instance meansCon: Means Grammar.Connective (Expr -> Expr -> MetaM Expr) where
   | Grammar.Connective.exclusiveOr => xor
   | Grammar.Connective.negatedDisjunction => nor
 
+
+def mkExistsFVars (fvars: Array Expr) (e: Expr) : MetaM Expr :=
+  fvars.foldrM (fun fvar acc => do
+    let typeFamily <- mkLambdaFVars #[fvar] acc
+    -- We use `mkAppM` since we need to instantiate an implicit argument.
+    mkAppM `Exists #[typeFamily]) e
+
+-- Wohoo, this works!!
+-- set_option trace.Meta.debug true
+-- def test : MetaM Unit := do
+--   let lc <- getLCtx
+--   trace[Meta.debug] "before: {lc.getFVarIds}"
+--   inContext #[`x, `y] fun fvars => do
+--     let lc <- getLCtx
+--     trace[Meta.debug] "after: {lc.getFVarIds}"
+
+--     let f <- appN `And #[fvars[0], fvars[1]]
+--     let e <- mkExistsFVars fvars f
+--     trace[Meta.debug] "Result: {e}"
+-- #eval test
 
 instance meansQuant: Means Grammar.Quantifier (Array Expr -> Expr -> Expr -> MetaM Expr) where
   interpret
@@ -265,12 +275,11 @@ instance meansQuant: Means Grammar.Quantifier (Array Expr -> Expr -> Expr -> Met
   -- `For some blue gadget $x$ we have $p$.`
   -- -> `∃x. blue(x) ∧ p`
   | Grammar.Quantifier.existentially => fun fvars bound claim => do
-    let typeFamily <- mkLambdaFVars fvars <| <- and bound claim
-    appN `Exists #[typeFamily]
+    mkExistsFVars fvars (<- and bound claim)
 
   | Grammar.Quantifier.nonexistentially => fun fvars bound claim => do
-    let typeFamily <- mkLambdaFVars fvars <| <- and bound claim
-    not (<- appN `Exists #[typeFamily])
+    let exists' <- mkExistsFVars fvars (<- and bound claim)
+    not exists'
 
 
 instance : Means Grammar.Bound (MetaM Expr) where
@@ -341,6 +350,11 @@ mutual
       let term <- interpret term
       meansNP.interpret np term
     | Grammar.Stmt.neg stmt => do not (<- interpret' meansStmt stmt)
+    | Grammar.Stmt.exists' np => do
+        let varSymbs := np.vars.map interpret
+        inContext varSymbs fun fvars => do
+          mkExistsFVars fvars (<- meansNPV.interpret np)
+
     | Grammar.Stmt.connected connective stmt1 stmt2 => do
       let stmt1 <- interpret' meansStmt stmt1
       let stmt2 <- interpret' meansStmt stmt2
@@ -357,8 +371,8 @@ mutual
 
           meansQuant.interpret quantifier fvars np stmt
 
+    -- Ex: `for all $d$ such that $d\divides m, n$, we have that $d = 1$.`
     | Grammar.Stmt.symbolicQuantified (Grammar.QuantPhrase.mk quantifier np) varSymbs bound suchThat? claim => sorry
-    | _ => sorry
 end
 
 
