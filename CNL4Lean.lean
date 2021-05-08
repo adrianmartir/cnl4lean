@@ -2,6 +2,7 @@
 import Lean
 import CNL4Lean.Grammar
 import CNL4Lean.Deserialize
+import CNL4Lean.Predef
 
 
 open Lean
@@ -28,5 +29,6 @@ def f : IO DeserializationError := do
     | Except.ok c => panic! "oh yes"
     | Except.error e => e
 
+-- How do I read a `.lean` file? Does that even work from `MetaM`?
 
 -- #eval f

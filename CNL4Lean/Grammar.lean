@@ -245,11 +245,11 @@ inductive Defn where
   | defn : Array Asm -> DefnHead -> Stmt -> Defn
   | fun' : Array Asm -> Fun -> Option Term -> Term -> Defn
 
-inductive Axiom where
-  -- Assumptions should be read sequentially in order to modify the local context
-  -- recursively in order to finally read the `stmt`. Finally the assumptions get
-  -- wrapped into a local binding.
-  | mk: Array Asm -> Stmt -> Axiom
+-- inductive Axiom where
+--   -- Assumptions should be read sequentially in order to modify the local context
+--   -- recursively in order to finally read the `stmt`. Finally the assumptions get
+--   -- wrapped into a local binding.
+--   | mk: Array Asm -> Stmt -> Axiom
 
 inductive Lemma where
   | mk: Array Asm -> Stmt -> Lemma

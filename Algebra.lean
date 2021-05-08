@@ -49,7 +49,7 @@ class PowMinusOne (α: Type u) where
 
 open PowMinusOne
 
-notation:max "⁻¹" arg  => minus arg
+notation:max "⁻¹" arg  => powMinusOne arg
 
 class Minus (α: Type u) where
   minus: α -> α
@@ -71,55 +71,54 @@ end Notation
 
 open Notation
 
-abbrev Commutative (X : SemigroupStr) := forall x y : X, x ∘ y = y ∘ x
+class Commutative (X : SemigroupStr) where
+  comm : forall x y : X, x ∘ y = y ∘ x
 
-abbrev Associative (X: SemigroupStr) := forall x y z: X, (x ∘ y) ∘ z = x ∘ (y ∘ z)
+class Associative (X: SemigroupStr) where
+  assoc : forall x y z: X, (x ∘ y) ∘ z = x ∘ (y ∘ z)
 
-abbrev LeftIdentity (X: MonoidStr) := forall x, X.id ∘ x = x
-abbrev RightIdentity (X: MonoidStr) := forall x, x ∘ X.id = x
+class LeftIdentity (X: MonoidStr) where
+  leftId : forall x, X.id ∘ x = x
 
-abbrev RightInverse (X: GroupStr) := forall x, x ∘ X.inv x = X.id
-abbrev LeftInverse (X: GroupStr) := forall x, X.inv x ∘ x = X.id
+class RightIdentity (X: MonoidStr) where
+  rightId : forall x, x ∘ X.id = x
+
+class RightInverse (X: GroupStr) where
+  rightInv : forall x, x ∘ X.inv x = X.id
+
+class LeftInverse (X: GroupStr) where
+  leftInv : forall x, X.inv x ∘ x = X.id
 
 ----------
 -- We implement properties with type classes!
-abbrev IsMonoid (X: MonoidStr) :=
-  Associative X.toSemigroupStr ∧ LeftIdentity X ∧ RightIdentity X
+class IsMonoid (X: MonoidStr) extends Associative X.toSemigroupStr, LeftIdentity X, RightIdentity X where
 
-abbrev IsGroup (X: GroupStr) :=
-  IsMonoid X.toMonoidStr ∧ LeftInverse X ∧ RightInverse X
+class IsGroup (X: GroupStr) extends IsMonoid X.toMonoidStr where
+  leftInv : LeftInverse X
+  rightInverse : RightInverse X
 
--- It seems that structures have an automatic `Prop -> Type` coercion.
-structure Group where
-  X: GroupStr
-  p: IsGroup X
+-- 1. Construction.
+-- This should be fairly natural:
+-- `\begin{definition}`
+-- `Define $G$ to be the group structure ... on $X$.`
+-- `\end{definition}`
+-- (This should have an automatic coercion to type)
+-- Then:
+-- `\begin{lemma} \instance`
+-- `$G$ is a group.`
+-- `\end{lemma}`
 
--- `Let $G$ be a group. Then [...]` should define a function
--- `G: Group -> ?m`, where `[...]` can access
--- the group by using the `$G$` binding.
+-- 2. Usage.
+-- `Let $G$ be a group.` should be interpreted adding to the context `G: GroupStr` and
+-- `IsGroup G`.
 
--- This is useful if `[...]` is something like
--- `The group cohomology of $G$.`,
--- which needs `$G$` to be an actual group instead of only group
--- structure.
+-- I think handling properties as typeclasses is good, because there are many properties
+-- that are constructed ad-hoc. Like `irreducible, finite monoid $m$`. We would like to
+-- automatically throw away excess properties when passing `$m$` to a function that maybe
+-- only expects a semigroup. This linguistic shuffling around of adjectives and properties must be automated
+-- in order to get a reasonable interface. And the only tool available are typeclasses.
 
--- The difference between propositions and types only comes into play
--- when constructing groups. I would like to do something like:
-
--- `Define the group structure $G$ on $X$ to be .....`
--- `Lemma. $G$ is a group.`
 
 -- Hm, can we do this?
 -- def inverseFromExistence (X: MonoidStr) (p: forall x, exists y: X, x ∘ y = X.id) : GroupStr := by
 --   apply GroupStr.mk
-
--- Hm, I guess one can get composition without typeclasses.... Maybe? This will take experimentation
--- def compose {G: SemigroupStr} (g h: G) := g ∘ h
--- #check compose
-
--- def naturals: SemigroupStr where
---   obj := Nat
---   op := Nat.add
-
--- #check naturals.obj
--- #check naturals.op 4 5

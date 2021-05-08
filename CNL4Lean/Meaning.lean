@@ -24,6 +24,11 @@ open Lean.Meta
 
 -- It might be worth looking at `elabOpen` and `elabGrammar.Term` in `Elab/Grammar.Term.lean`.
 
+-- This is the main typeclass we structure our interpretation code around
+-- After writing quite a lot of code with it I realize that this way of
+-- structuring code in lean is quite cumbersome, since we can't use it for things
+-- like recursive definitions and currying - so we end up explicitly passing
+-- instance implementations half of the time. We would probably be better off without this typeclass.
 class Means (α: Type) (β: Type) [Inhabited β] where
   interpret : α -> β
 
@@ -109,6 +114,7 @@ partial instance meansE: Means Grammar.Expr (MetaM Expr) where
     -- higher order logic.
   | _ => sorry
 
+def true: Expr := mkConst `True
 
 def not (e: Expr) : MetaM Expr := appN `Not #[e]
 
@@ -117,7 +123,7 @@ def and (p1: Expr) (p2: Expr) : MetaM Expr := appN `And #[p1, p2]
 def or (p1: Expr) (p2: Expr) : MetaM Expr := appN `Or #[p1, p2]
 
 def andN (ps: Array Expr) : MetaM Expr := do
-  ps.foldlM and (<- mkConst `True)
+  ps.foldlM and (<- true)
 
 def implies (p1: Expr) (p2: Expr) : MetaM Expr :=
   appN `implies #[p1, p2]
@@ -141,7 +147,7 @@ private def interpretRel (lhs: Array Grammar.Expr) (sgn : Grammar.Sign) (rel: Gr
     let lhs <- lhs.mapM interpret
     let rhs <- rhs.mapM interpret
 
-    let mut acc := mkConst `True
+    let mut acc := true
     for l in lhs do
       for r in rhs do
         let head <- appN relator #[l, r]
@@ -223,19 +229,18 @@ instance meansAdjR: Means Grammar.AdjR (Expr -> MetaM Expr) where
 
 
 -- Eventually we want to support optional type annotations in binders (in `vars`)
-partial def inContext (vars: Array Name) (k: Array Expr -> MetaM α) : MetaM α :=
-  -- This rather messy code shows that higher order functions don't compose
-  -- too well.
-  let rec loop (i : Nat) (declaredVars : Array Expr) : MetaM α := do
-    if h : i < vars.size then
-      let name := vars.get ⟨i,h⟩
-      let u <- mkFreshLevelMVar
-      let type <- mkFreshExprMVar (mkSort u)
-      withLocalDecl name BinderInfo.default type fun fvar =>
-        loop (i+1) (declaredVars.push fvar)
-    else
-      k declaredVars
-  loop 0 #[]
+def inContext (vars: Array Name) (k: Array Expr -> MetaM α) : MetaM α :=
+  let inCtx := vars.foldr (fun name k declaredFvars => do
+    -- We declare the variable `name` and then run `k` in a context containing
+    -- this new free variable.
+    let u <- mkFreshLevelMVar
+    let type <- mkFreshExprMVar (mkSort u)
+    withLocalDecl name BinderInfo.default type fun fvar =>
+      k (declaredFvars.push fvar)) k
+
+  -- For some reason we can't directly curry this.
+  inCtx #[]
+
 
 instance meansCon: Means Grammar.Connective (Expr -> Expr -> MetaM Expr) where
   interpret
@@ -287,11 +292,12 @@ instance meansQuant: Means Grammar.Quantifier (Array Expr -> Expr -> Expr -> Met
     not exists'
 
 
-instance : Means Grammar.Bound (Expr -> MetaM Expr) where
+instance meansBound: Means Grammar.Bound (Expr -> MetaM Expr) where
   interpret
-  | Grammar.Bound.unbounded => fun e => mkConst `True
+  | Grammar.Bound.unbounded => fun e => true
   | Grammar.Bound.bounded sgn relator expr => fun e => do
-    appN (interpret relator) #[<- interpret expr, e]
+    let bound <- appN (interpret relator) #[e, <- interpret expr]
+    interpret' meansSgn sgn bound
 
 mutual
   -- Ex: `[Aut(M) is] a simple group $G$ such that the order $G$ is odd.`
@@ -328,7 +334,7 @@ mutual
     interpret
     | Grammar.NounPhraseVars.mk adjL noun varSymbs adjR stmt? => do
       let fvars := varSymbs.map interpret |>.map mkFVar
-      -- Apply the grammatical predictes to free variables
+      -- Apply the grammatical predictes to all of the free variables
       let nounProps <- fvars.mapM (interpret noun)
       let adjLProps <- fvars.mapM (interpret adjL)
       let adjRProps <- fvars.mapM (interpret adjR)
@@ -377,19 +383,60 @@ mutual
 
           meansQuant.interpret quantifier fvars np stmt
 
-    -- Ex: `for all $d ∈ \even$ such that $d\divides m, n$, we have that $d = 1$.`
-    | Grammar.Stmt.symbolicQuantified quantifiier varSymbs bound suchThat? claim => do
+    -- Ex: `for all $d ∈ S$ such that $d \divides m, n$, we have that $d = 1$.`
+    | Grammar.Stmt.symbolicQuantified quantifier varSymbs bound suchThat? claim => do
       let varSymbs := varSymbs.map interpret
 
       inContext varSymbs fun fvars => do
+        let bounds <- fvars.mapM (meansBound.interpret bound)
+        let suchThat <- match suchThat? with
+          | some stmt => interpret' meansStmt stmt
+          | none => true
 
-      sorry
+        let condition <- and (<- andN bounds) suchThat
+        let claim <- interpret' meansStmt claim
+        meansQuant.interpret quantifier fvars condition claim
 end
 
+-- Run `MetaM Expr` with a given assumption.
+-- Ex: `Let $n,m$ be natural numbers. Let $n >= m$. The difference of $n$ and $m$ is $n - m$.`
+-- This should interpret to a term
+-- `λ n, m, p . minus(n,m)`
+-- of type
+-- `(n:Nat) -> (m:Nat) -> (n >= m) -> Nat`
+-- This will probably take quite a bit of tweaking
 
--- def interpretAsm (asm : Grammar.Asm) : MetaM Int := sorry
--- -- 1) Simply add the variable to the local context (without type) (say, `x : ?m`).
--- -- 2) Run `MetaM` in that context in order to parse the statement/expression/...
+-- Properties as type classes? This may give an automated way of handling properties silently, without having to pack and unpack structs or tuples all the time.
+def withAssumption (asm: Grammar.Asm) (e: Array Expr -> MetaM Expr) (fvars: Array Expr): MetaM Expr := match asm with
+  | Grammar.Asm.suppose stmt => do
+    -- This should be a (dependent) lambda abstraction in general
+    let (condition : Expr) <- interpret stmt
+    withLocalDecl (<- mkFreshId) (BinderInfo.default) condition fun fvar =>
+      e (fvars.push fvar)
 
--- -- This should yield an environment of declarations.
+  | Grammar.Asm.letNoun varSymbs np => do
+    let varSymbs := varSymbs.map interpret
+    inContext varSymbs fun newVars => do
+      let pred := interpret np
+      let conditions <- andN (<- newVars.mapM pred)
+      withLocalDecl (<- mkFreshId) (BinderInfo.default) conditions fun fvar =>
+        e (fvars.append newVars |>.push fvar)
+      -- Finally we need to (dependently) lambda abstract the free variables and proofs of the predicates and run `e` in that ctx.
+  -- | Grammar.Asm.letIn varSymbs type => do
+  --   -- let type <- interpret type
+  --   sorry
+  | _ => sorry
+
+-- Hm, not sure whether I should `mkForallFVars` all at once
+-- in the end or do it at every `withAssumption` step.
+-- Note: For definitions it is really easy to do envision an implementation of implicit arguments(since we specify the ones that should be explicit in the pattern), but for lemmas it is harder.
+instance: Means Grammar.Lemma (MetaM Expr) where
+  interpret
+  | Grammar.Lemma.mk asms stmt =>
+    let f := asms.foldr withAssumption (fun fvars => do
+      let stmt <- interpret stmt
+      mkForallFVars fvars stmt)
+    f #[]
+
+-- This should yield an environment of declarations.
 -- def interpretPara (p: Grammar.Para) : MetaM Unit := sorry

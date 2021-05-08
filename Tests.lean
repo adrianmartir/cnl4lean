@@ -1,5 +1,6 @@
 
 import Lean
+import CNL4Lean
 
 open Lean
 open Meta
@@ -51,7 +52,7 @@ def defaultEnvironment : Environment := arbitrary
 
 -- Question: Why is the local context immutable in MetaM?
 
-def f [Add α] (x:α) : List α := [x,x,x+x]
+def foo [Add α] (x:α) : List α := [x,x,x+x]
 
 def Foo.Bar.g := 5
 
@@ -68,9 +69,9 @@ def test : MetaM Unit := do
   -- The informatin about `f` will be queried from the environment. The environment
   -- will probably be passed to the the `MetaM` monad when we call `#eval`. This also
   -- explains why the local context is empty.
-  let t <- mkAppM `f #[mkNatLit 2]
+  let t <- mkAppM `foo #[mkNatLit 2]
   let g <- `g
-  let s <- getConstInfo `f
+  let s <- getConstInfo `foo
   trace[Meta.debug] "level param: {s.levelParams}"
   let fType <- s.type
 
@@ -290,11 +291,11 @@ def application : MetaM Unit := do
 def i := fun x => List x
 #check i
 
-def foo :=
+def bar :=
   let f x y := 6
   f 9 9
 
-#eval foo
+#eval bar
 
 
 private def app' (f: Expr) (arg: Expr) : MetaM Expr := do
@@ -361,3 +362,15 @@ def j {p: True} : Nat := 4
 #check exists x y, And x y
 #check Exists fun x => (Exists fun y => And x y)
 #check Exists
+
+-- This first one apparently reduces to a proposition
+#check (5=5) -> (3=3)
+#check (5=5) -> Int
+
+#check (_: Nat) -> Nat
+
+#check importModules
+#check Import
+
+def imp: MetaM Unit := do
+  importModules [{module := `CNL4Lean}]

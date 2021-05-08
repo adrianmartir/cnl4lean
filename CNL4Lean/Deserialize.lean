@@ -301,8 +301,8 @@ mutual
     | some ("StmtQuantPhrase", arr #[qPhrase, stmt]) => Stmt.quantPhrase
         <$> deserializeQPhrase qPhrase
         <*> deserializeStmt stmt
-    | some ("SymbolicQuantified", arr #[qPhrase, varSymbs, bound, suchThat, stmt]) => Stmt.symbolicQuantified
-        <$> deserializeQPhrase qPhrase
+    | some ("SymbolicQuantified", arr #[quantifier, varSymbs, bound, suchThat, stmt]) => Stmt.symbolicQuantified
+        <$> deserialize quantifier
         <*> deserialize varSymbs
         <*> deserialize bound
         <*> deserializeStmt suchThat
@@ -367,12 +367,12 @@ instance : Deserializable Defn where
         <*> deserialize term
     | _ => throwUnexpected "definition" json
 
-instance : Deserializable Axiom where
-  deserialize json := match getInductive? json with
-    | some ("Axiom", arr #[asms, stmt]) => Axiom.mk
-        <$> deserialize asms
-        <*> deserialize stmt
-    | _ => throwUnexpected "axiom" json
+-- instance : Deserializable Axiom where
+--   deserialize json := match getInductive? json with
+--     | some ("Axiom", arr #[asms, stmt]) => Axiom.mk
+--         <$> deserialize asms
+--         <*> deserialize stmt
+--     | _ => throwUnexpected "axiom" json
 
 instance : Deserializable Lemma where
   deserialize json := match getInductive? json with
