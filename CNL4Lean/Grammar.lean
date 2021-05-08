@@ -176,12 +176,12 @@ inductive Bound where
 mutual
   -- Interprets to an expression `p` of type `?b -> Prop`.
   inductive NounPhrase where
-    | mk : AdjL -> Noun Term -> Option VarSymbol -> AdjR -> Option Stmt -> NounPhrase
+    | mk : Array AdjL -> Noun Term -> Option VarSymbol -> Array AdjR -> Option Stmt -> NounPhrase
 
   -- Interprets to a `Prop` in a suitable context.
   -- Warning: `NounPhrase` and `NounPhraseVars` get used in *very* different contexts.
   inductive NounPhraseVars where
-    | mk : AdjL -> Noun Term -> Array VarSymbol -> AdjR -> Option Stmt -> NounPhraseVars
+    | mk : Array AdjL -> Noun Term -> Array VarSymbol -> Array AdjR -> Option Stmt -> NounPhraseVars
 
   inductive QuantPhrase where
     | mk : Quantifier -> NounPhraseVars -> QuantPhrase

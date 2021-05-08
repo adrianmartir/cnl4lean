@@ -56,7 +56,8 @@ def foo [Add α] (x:α) : List α := [x,x,x+x]
 
 def Foo.Bar.g := 5
 
--- open Foo
+open Foo
+#check Bar.g
 
 def g (i: Int) (j: Int) := i
 
@@ -71,7 +72,7 @@ def test : MetaM Unit := do
   -- explains why the local context is empty.
   let t <- mkAppM `foo #[mkNatLit 2]
   let g <- `g
-  let s <- getConstInfo `foo
+  let s <- getConstInfo `Foo.Bar.g
   trace[Meta.debug] "level param: {s.levelParams}"
   let fType <- s.type
 
@@ -99,6 +100,9 @@ def test : MetaM Unit := do
   -- open declarations to `MetaM`
   let t <- resolveNamespace `Foo.Bar.g
   trace[Meta.debug] "resolved ns: {t}"
+
+  let o <- getOpenDecls
+  trace[Meta.debug] "open declarations: {o}"
 
   unless (<- isDefEq p type) do throwError "unexpected"
   -- This is legitimately cool, that this works.
@@ -369,8 +373,46 @@ def j {p: True} : Nat := 4
 
 #check (_: Nat) -> Nat
 
-#check importModules
-#check Import
 
-def imp: MetaM Unit := do
-  importModules [{module := `CNL4Lean}]
+def importTest : MetaM Unit := do
+  -- We reimport `Predef` in order to have a more or less clean environment
+  -- We might want to throw out more modules out of the env in order to remove
+  -- unnecessary garbage.
+  -- We might want to manually compile `Predef` to an `.olean` file in the future.
+  let env <- importModules [{module := `CNL4Lean.Predef}] Options.empty
+  modifyEnv (fun _ => env)
+
+  let a := env.constants.size
+  trace[Meta.debug] "size: {a}"
+
+  -- let m := (<- getEnv).allImportedModuleNames
+  -- trace[Meta.debug] "all imported {m}"
+
+  let s <- getConstInfo `CNL4Lean.Predef.xor
+  let type <- s.type
+  trace[Meta.debug] "type of xor: {type}"
+
+  -- pushScope
+  withTheReader Core.Context (fun ctx => { ctx with openDecls := [OpenDecl.simple `CNL4Lean [], OpenDecl.simple `CNL4Lean.Predef []] }) do
+    let o <- getOpenDecls
+    trace[Meta.debug] "open declarations: {o}"
+
+    let currNamespace <- getCurrNamespace
+    trace[Meta.debug] "current namespace: {currNamespace}"
+
+    let res <- resolveGlobalConstNoOverload `xor
+    trace[Meta.debug] "resolved {res}"
+
+    let const := mkConst res
+    trace[Meta.debug] "const: {const}"
+
+    let const := mkConst `implies
+    trace[Meta.debug] "const: {const}"
+
+    -- This apparently is only for resolving namespaces, not constants.
+    let ns <- resolveNamespace `Predef
+    trace[Meta.debug] "namespace: {ns}"
+  -- popScope
+
+
+#eval importTest

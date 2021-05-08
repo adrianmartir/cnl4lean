@@ -375,11 +375,11 @@ instance : Deserializable Defn where
 --     | _ => throwUnexpected "axiom" json
 
 instance : Deserializable Lemma where
-  deserialize json := match getInductive? json with
-    | some ("Lemma", arr #[asms, stmt]) => Lemma.mk
+  deserialize
+    | arr #[asms, stmt] => Lemma.mk
         <$> deserialize asms
         <*> deserialize stmt
-    | _ => throwUnexpected "lemma" json
+    | json => throwUnexpected "lemma" json
 
 instance : Deserializable Para where
   deserialize json := match getInductive? json with

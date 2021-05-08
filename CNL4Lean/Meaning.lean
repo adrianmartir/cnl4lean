@@ -43,25 +43,30 @@ instance [Inhabited β]: Inhabited (Means α β) where
 def interpret' [Inhabited β] (means : Means α β) := @interpret α β _ means
 
 
-instance : Means Grammar.Pattern Name where
+instance : Means Grammar.Pattern (MetaM Name) where
   interpret pat :=
     pat.foldl (fun acc next => acc ++ toString next) ""
       |> Name.mkSimple
+      |> resolveGlobalConstNoOverload
 
-instance : Means Grammar.SgPl Name where
+instance : Means Grammar.SgPl (MetaM Name) where
   interpret pat := interpret pat.sg
 
-instance : Means Grammar.Relator Name where
-  interpret rel := toString rel ++ "rel" |> Name.mkSimple
+instance : Means Grammar.Relator (MetaM Name) where
+  interpret rel := toString rel ++ "Rel"
+      |> Name.mkSimple
+      |> resolveGlobalConstNoOverload
 
-instance : Means Grammar.SymbolicPredicate Name where
+instance : Means Grammar.SymbolicPredicate (MetaM Name) where
   interpret
-  | Grammar.SymbolicPredicate.mk s _ =>  toString s ++ "sPred" |> Name.mkSimple
+  | Grammar.SymbolicPredicate.mk s _ =>  toString s ++ "Pred"
+      |> Name.mkSimple
+      |> resolveGlobalConstNoOverload
 
 instance : Means Grammar.VarSymbol Name where
   interpret (var: Grammar.VarSymbol) : Name := match var with
   | Grammar.VarSymbol.namedVar name => Name.mkSimple name
-  | _ => sorry -- I think this rarely occurs
+  | _ => `thisShouldNotHappen -- I think this rarely occurs
 
 
 -- Simple unifying application.
@@ -91,9 +96,8 @@ private def appN (ident: Name) (args: Array Expr) : MetaM Expr := do
   args.foldlM (fun f arg => app f arg) f.1
 
 
-private def interpretApp [m1: Means α Name] [m2: Means β (MetaM Expr)] (ident: α) (args: Array β) : MetaM Expr := do
-  let args <- args.mapM interpret
-  appN (interpret ident) args
+private def interpretApp [m1: Means α (MetaM Name)] [m2: Means β (MetaM Expr)] (ident: α) (args: Array β) : MetaM Expr := do
+  appN (<- interpret ident) (<- args.mapM interpret)
 
 
 partial instance meansE: Means Grammar.Expr (MetaM Expr) where
@@ -106,13 +110,13 @@ partial instance meansE: Means Grammar.Expr (MetaM Expr) where
   | Grammar.Expr.mixfix symb args => do
     -- Can't use `interpretApp` here, because (due to a bug?) we can't pass explicit instances to it.
     let args <- args.mapM (interpret' meansE)
-    appN (interpret symb) args
-  | Grammar.Expr.app _ _ => sorry
+    appN (<- interpret symb) args
+  | Grammar.Expr.app _ _ => throwError "app not implemented yet"
     -- We want a dumbed-down application here(no implicits).
     -- Typeclasses should be merely a **notational** construct - which in
     -- CNL has gets handled in *patterns*. This should be only for doing
     -- higher order logic.
-  | _ => sorry
+  | _ => throwError "const not implemented yet"
 
 def true: Expr := mkConst `True
 
@@ -131,11 +135,13 @@ def implies (p1: Expr) (p2: Expr) : MetaM Expr :=
 def iff (p1: Expr) (p2: Expr) : MetaM Expr :=
   appN `Iff #[p1, p2]
 
-def xor (p1: Expr) (p2: Expr) : MetaM Expr :=
-  appN `xor #[p1, p2]
+def xor (p1: Expr) (p2: Expr) : MetaM Expr := do
+  -- `resolveGlobalConstNoOverload` expands the name according to current
+  -- open declarations.
+  appN (<- resolveGlobalConstNoOverload `xor) #[p1, p2]
 
-def nor (p1: Expr) (p2: Expr) : MetaM Expr :=
-  appN `nor #[p1, p2]
+def nor (p1: Expr) (p2: Expr) : MetaM Expr := do
+  appN (<- resolveGlobalConstNoOverload `nor) #[p1, p2]
 
 instance meansSgn: Means Grammar.Sign (Expr -> MetaM Expr) where
   interpret
@@ -143,7 +149,7 @@ instance meansSgn: Means Grammar.Sign (Expr -> MetaM Expr) where
   | Grammar.Sign.negative => not
 
 private def interpretRel (lhs: Array Grammar.Expr) (sgn : Grammar.Sign) (rel: Grammar.Relator) (rhs: Array Grammar.Expr): MetaM Expr := do
-    let relator := interpret rel
+    let relator <- interpret rel
     let lhs <- lhs.mapM interpret
     let rhs <- rhs.mapM interpret
 
@@ -172,7 +178,7 @@ partial instance meansC : Means Grammar.Chain (MetaM Expr) where
 instance : Means Grammar.Formula (MetaM Expr) where
   interpret
   | Grammar.Formula.chain chain => interpret chain
-  | Grammar.Formula.predicate p args => do appN (interpret p) (<- args.mapM interpret)
+  | Grammar.Formula.predicate p args => do appN (<- interpret p) (<- args.mapM interpret)
 
 mutual
   -- Patterns add indirection.
@@ -188,7 +194,7 @@ mutual
 end
 
 
-private def mkPred [m1: Means α Name] [m2: Means β (MetaM Expr)] (ident: α) (args: Array β) (e: Expr) : MetaM Expr := do
+private def mkPred [m1: Means α (MetaM Name)] [m2: Means β (MetaM Expr)] (ident: α) (args: Array β) (e: Expr) : MetaM Expr := do
     let p <- interpretApp ident args
     app p e
 
@@ -296,7 +302,7 @@ instance meansBound: Means Grammar.Bound (Expr -> MetaM Expr) where
   interpret
   | Grammar.Bound.unbounded => fun e => true
   | Grammar.Bound.bounded sgn relator expr => fun e => do
-    let bound <- appN (interpret relator) #[e, <- interpret expr]
+    let bound <- appN (<- interpret relator) #[e, <- interpret expr]
     interpret' meansSgn sgn bound
 
 mutual
@@ -425,7 +431,7 @@ def withAssumption (asm: Grammar.Asm) (e: Array Expr -> MetaM Expr) (fvars: Arra
   -- | Grammar.Asm.letIn varSymbs type => do
   --   -- let type <- interpret type
   --   sorry
-  | _ => sorry
+  | _ => throwError "asm not implemented yet"
 
 -- Hm, not sure whether I should `mkForallFVars` all at once
 -- in the end or do it at every `withAssumption` step.
