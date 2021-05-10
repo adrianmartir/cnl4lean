@@ -5,6 +5,7 @@ import Lean
 
 namespace CNL4Lean
 -- This is a painfully boring deserialization module.
+-- This code could be heavily simplified with macros.
 
 open Lean.Json
 open Grammar
@@ -36,15 +37,14 @@ instance : ToString DeserializationError where
 def throwUnexpected {α: Type u} {m: Type u -> Type v} [MonadExcept DeserializationError m] (s: String) (json: Lean.Json) : m α :=
   throw (unexpectedValue s json)
 
--- I originally used this typeclass for this module:
--- variable [Monad m] [MonadExcept DeserializationError m]
--- But then this module needs like 10 minutes to compile.
--- This is so odd.
+-- I originally used the `MonadExcept` class for error handling,
+-- but typeclass inference took very long.
 
-class Deserializable (α: Type) where
-  deserialize : Lean.Json -> DeserializeM α
-
-open Deserializable
+-- We also use a non-typeclass type for deserialization in order
+-- to make the code check faster and avoid issues with recursion
+-- and typeclasses. Moreover there is not much of a benefit to
+-- typeclasses if they are only used in this one file.
+abbrev Deserialize α := Lean.Json -> DeserializeM α
 
 -- In order to implement `partial`, lean needs to prove that the partial
 -- functions we are constructing actually have a total implementation.
@@ -53,15 +53,14 @@ instance : Inhabited (DeserializeM α) where
   default := throw arbitrary
 
 
+-- def getArr (get : Deserialize α) : Deserialize (Array α)
+--   | arr a => a.mapM get
+--   | json => throwUnexpected "array" json
 
-def deserializeArr [Deserializable α] : Lean.Json -> DeserializeM (Array α)
-  | arr a => a.mapM deserialize
-  | json => throwUnexpected "array" json
 
-
-def deserialize? [Deserializable α] : Lean.Json -> DeserializeM (Option α)
+def get? (get : Deserialize α) : Deserialize (Option α)
   | Lean.Json.null => none
-  | json => some <$> deserialize json
+  | json => some <$> get json
 
 -- We provide this instance in order to temporarily use do notation for
 -- `Option`.
@@ -86,323 +85,282 @@ where
     (tag, contents)
 
 
-instance : Deserializable Delim where
-  deserialize
-    | "Invis" => Invis
-    | "Paren" => Paren
-    | "Brace" => Brace
-    | "Bracket" => Bracket
-    | json => throwUnexpected "delimiter" json
+def Delim.get : Deserialize Delim
+  | "Invis" => Invis
+  | "Paren" => Paren
+  | "Brace" => Brace
+  | "Bracket" => Bracket
+  | json => throwUnexpected "delimiter" json
 
 
-instance : Deserializable Tok where
-  deserialize json := match getInductive? json with
+def Tok.get : Deserialize Tok := fun json =>
+  match getInductive? json with
     | some ("Word", str t) => Tok.word t
     | some ("Variable", str t) => Tok.variable' t
     | some ("Symbol", str t) => Tok.symbol t
     | some ("Integer", (n: Int)) => Tok.integer n
     | some ("Command", str t) => Tok.command t
-    | some ("Open", t) => Tok.open' <$> deserialize t
-    | some ("Close", t) => Tok.close <$> deserialize t
+    | some ("Open", t) => Tok.open' <$> Delim.get t
+    | some ("Close", t) => Tok.close <$> Delim.get t
     | _ => throwUnexpected "token" json
 
 
-instance : Deserializable VarSymbol where
-  deserialize json := match getInductive? json with
+def VarSymbol.get : Deserialize VarSymbol := fun json =>
+  match getInductive? json with
     | some ("NamedVar", str t) => VarSymbol.namedVar t
     | some ("FreshVar", (n: Int)) => VarSymbol.freshVar n
     | _ => throwUnexpected "variable symbol" json
 
-instance : Deserializable Pattern where
-  deserialize
-    | arr a => a.mapM deserialize?
-    | json => throwUnexpected "pattern" json
+def Pattern.get : Deserialize Pattern
+  | arr a => a.mapM (get? Tok.get)
+  | json => throwUnexpected "pattern" json
 
 
-private partial def deserializeExpr (json: Lean.Json) : DeserializeM Expr := match getInductive? json with
-    | some ("ExprVar", varSymb) => Expr.var <$> deserialize varSymb
-    | some ("ExprInteger", (n : Int)) => Expr.int n
-    | some ("ExprConst", t) => Expr.const <$> deserialize t
-    | some ("ExprMixfix", arr #[pattern, arr args]) => do
-      let pattern <- deserialize pattern
-      let args <- args.mapM deserializeExpr
-      Expr.mixfix pattern args
-    | _ => throwUnexpected "expression" json
+partial def Expr.get (json: Lean.Json) : DeserializeM Expr := match getInductive? json with
+  | some ("ExprVar", varSymb) => Expr.var <$> VarSymbol.get varSymb
+  | some ("ExprInteger", (n : Int)) => Expr.int n
+  | some ("ExprConst", t) => Expr.const <$> Tok.get t
+  | some ("ExprMixfix", arr #[pattern, arr args]) => do
+    let pattern <- Pattern.get pattern
+    let args <- args.mapM get
+    Expr.mixfix pattern args
+  | _ => throwUnexpected "expression" json
 
-instance : Deserializable Expr := mk deserializeExpr
-
-instance : Deserializable Sign where
-  deserialize
-    | "Positive" => Sign.positive
-    | "Negative" => Sign.negative
-    | json => throwUnexpected "sign" json
+def Sign.get : Deserialize Sign
+  | "Positive" => Sign.positive
+  | "Negative" => Sign.negative
+  | json => throwUnexpected "sign" json
 
 
-private partial def deserializeChain (json: Lean.Json) : DeserializeM Chain := match getInductive? json with
+private partial def Chain.get : Deserialize Chain := fun json => match getInductive? json with
   | some ("ChainBase", arr #[arr leftExprs, sgn, rel, arr rightExprs]) => do
-    let leftExprs <- leftExprs.mapM deserialize
-    let sgn <- deserialize sgn
-    let rel <- deserialize rel
-    let rightExprs <- rightExprs.mapM deserialize
+    let leftExprs <- leftExprs.mapM Expr.get
+    let sgn <- Sign.get sgn
+    let rel <- Tok.get rel
+    let rightExprs <- rightExprs.mapM Expr.get
     Chain.chainBase leftExprs sgn rel rightExprs
   | some ("ChainCons", arr #[arr leftExprs, sgn, rel, chain]) => do
-    let leftExprs <- leftExprs.mapM deserialize
-    let sgn <- deserialize sgn
-    let rel <- deserialize rel
-    let chain <- deserializeChain chain
+    let leftExprs <- leftExprs.mapM Expr.get
+    let sgn <- Sign.get sgn
+    let rel <- Tok.get rel
+    let chain <- get chain
     Chain.chainCons leftExprs sgn rel chain
   | _ => throwUnexpected "chain" json
 
 
-instance : Deserializable Chain where
-  deserialize := deserializeChain
-
-instance : Deserializable SymbolicPredicate where
-  deserialize
-    | arr #[str pred, (arity : Int)] => SymbolicPredicate.mk pred arity
-    | json => throwUnexpected "symbolic predicate" json
+def SymbolicPredicate.get : Deserialize SymbolicPredicate
+  | arr #[str pred, (arity : Int)] => SymbolicPredicate.mk pred arity
+  | json => throwUnexpected "symbolic predicate" json
 
 
-instance : Deserializable Formula where
-  deserialize (json: Lean.Json) : DeserializeM Formula := match getInductive? json with
-  | some ("FormulaChain", t) => Formula.chain <$> deserialize t
+def Formula.get : Deserialize Formula := fun json => match getInductive? json with
+  | some ("FormulaChain", t) => Formula.chain <$> Chain.get t
   | some ("FormulaPredicate", arr #[pred, arr args]) =>
-    Formula.predicate <$> deserialize pred <*> args.mapM deserialize
+    Formula.predicate <$> SymbolicPredicate.get pred <*> args.mapM Expr.get
   | _ => throwUnexpected "formula" json
 
-instance : Deserializable SgPl where
-  deserialize (json: Lean.Json) : DeserializeM SgPl := do
+def SgPl.get : Deserialize SgPl := fun json => do
     let sg <- match json.getObjVal? "sg" with
-      | some sg => deserialize sg
+      | some sg => Pattern.get sg
       | none => throwUnexpected "SgPl" json
 
     let pl <- match json.getObjVal? "pl" with
-      | some pl => deserialize pl
+      | some pl => Pattern.get pl
       | none => throwUnexpected "SgPl" json
 
     pure { sg := sg, pl := pl }
 
 mutual
-  partial def deserializeTerm (json: Lean.Json): DeserializeM Term := match getInductive? json with
-    | some ("TermExpr", t) => Term.expr <$> deserialize t
-    | some ("TermFun", t) => Term.function <$> deserializeFun t
+  partial def getTerm : Deserialize Term := fun json => match getInductive? json with
+    | some ("TermExpr", t) => Term.expr <$> Expr.get t
+    | some ("TermFun", t) => Term.function <$> getFun t
     | _ => throwUnexpected "term" json
 
-  partial def deserializeFun : Lean.Json -> DeserializeM Fun
-    | arr #[sgPl, arr args] => Fun.mk <$> deserialize sgPl <*> args.mapM deserializeTerm'
+  partial def getFun : Deserialize Fun
+    | arr #[sgPl, arr args] => Fun.mk <$> SgPl.get sgPl <*> args.mapM getTerm'
     | json => throwUnexpected "functional noun" json
   where
     -- This is a workaround for a bug, where the lean kernel doesn't find
-    -- the `deserializedTerm` namespace when passed to `mapM`
-    deserializeTerm' := deserializeTerm
+    -- the `getdTerm` namespace when passed to `mapM`
+    getTerm' := getTerm
 end
 
+def Term.get := getTerm
+def Fun.get := getFun
 
-instance : Deserializable Fun := mk deserializeFun
-instance : Deserializable Term := mk deserializeTerm
+def Noun.get (get: Deserialize α) : Deserialize (Noun α)
+  | arr #[sgPl, arr args] =>
+    Noun.mk <$> SgPl.get sgPl <*> args.mapM get
+  | json => throwUnexpected "noun" json
 
-instance [Deserializable α]: Deserializable (Noun α) where
-  deserialize
-    | arr #[sgPl, arr args] =>
-      Noun.mk <$> deserialize sgPl <*> args.mapM deserialize
-    | json => throwUnexpected "noun" json
+def Adj.get (get: Deserialize α) : Deserialize (Adj α)
+  | arr #[pat, arr args] =>
+    Adj.mk <$> Pattern.get pat <*> args.mapM get
+  | json => throwUnexpected "adjective" json
 
-instance [Deserializable α]: Deserializable (Adj α) where
-  deserialize
-    | arr #[sgPl, arr args] =>
-      Adj.mk <$> deserialize sgPl <*> args.mapM deserialize
-    | json => throwUnexpected "adjective" json
+def Verb.get (get: Deserialize α) : Deserialize (Verb α)
+  | arr #[sgPl, arr args] =>
+    Verb.mk <$> SgPl.get sgPl <*> args.mapM get
+  | json => throwUnexpected "verb" json
 
-instance [Deserializable α]: Deserializable (Verb α) where
-  deserialize
-    | arr #[sgPl, arr args] =>
-      Verb.mk <$> deserialize sgPl <*> args.mapM deserialize
-    | json => throwUnexpected "verb" json
-
-instance : Deserializable VerbPhrase where
-  deserialize (json: Lean.Json) : DeserializeM VerbPhrase := match getInductive? json with
-    | some ("VPVerb", t) => VerbPhrase.verb <$> deserialize t
-    | some ("VPAdj", t) => VerbPhrase.adj <$> deserialize t
-    | some ("VPVerbNot", t) => VerbPhrase.verbNot <$> deserialize t
-    | some ("VPAdjNot", t) => VerbPhrase.adjNot <$> deserialize t
+def VerbPhrase.get : Deserialize VerbPhrase := fun json => match getInductive? json with
+    | some ("VPVerb", t) => VerbPhrase.verb <$> Verb.get Term.get t
+    | some ("VPAdj", t) => VerbPhrase.adj <$> Adj.get Term.get t
+    | some ("VPVerbNot", t) => VerbPhrase.verbNot <$> Verb.get Term.get t
+    | some ("VPAdjNot", t) => VerbPhrase.adjNot <$> Adj.get Term.get t
     | _ => throwUnexpected "verb phrase" json
 
-instance : Deserializable AdjL where
-  deserialize
-    | arr #[sgPl, arr args] =>
-      AdjL.mk <$> deserialize sgPl <*> args.mapM deserialize
-    | json => throwUnexpected "left adjective" json
+def AdjL.get : Deserialize AdjL
+  | arr #[pat, arr args] =>
+    AdjL.mk <$> Pattern.get pat <*> args.mapM Term.get
+  | json => throwUnexpected "left adjective" json
 
-instance : Deserializable AdjR where
-  deserialize (json: Lean.Json) : DeserializeM AdjR := match getInductive? json with
-    | some ("AdjR", arr #[sgPl, arr args]) =>
-      AdjR.adjR <$> deserialize sgPl <*> args.mapM deserialize
-    | _ => throwUnexpected "right adjective" json
+def AdjR.get : Deserialize AdjR := fun json => match getInductive? json with
+  | some ("AdjR", arr #[pat, arr args]) =>
+    AdjR.adjR <$> Pattern.get pat <*> args.mapM Term.get
+  | _ => throwUnexpected "right adjective" json
 
-instance : Deserializable Connective where
-  deserialize
-    | "Conjunction" => Connective.conjunction
-    | "Disjunction" => Connective.disjunction
-    | "Implication" => Connective.implication
-    | "Equivalence" => Connective.equivalence
-    | "ExclusiveOr" => Connective.exclusiveOr
-    | "NegatedDisjunction" => Connective.negatedDisjunction
-    | json => throwUnexpected "connective" json
+def Connective.get : Deserialize Connective
+  | "Conjunction" => Connective.conjunction
+  | "Disjunction" => Connective.disjunction
+  | "Implication" => Connective.implication
+  | "Equivalence" => Connective.equivalence
+  | "ExclusiveOr" => Connective.exclusiveOr
+  | "NegatedDisjunction" => Connective.negatedDisjunction
+  | json => throwUnexpected "connective" json
 
-instance : Deserializable Quantifier where
-  deserialize
-    | "Universally" => Quantifier.universally
-    | "Existentially" => Quantifier.existentially
-    | "Nonexistentially" => Quantifier.nonexistentially
-    | json => throwUnexpected "quantifier" json
+def Quantifier.get : Deserialize Quantifier
+  | "Universally" => Quantifier.universally
+  | "Existentially" => Quantifier.existentially
+  | "Nonexistentially" => Quantifier.nonexistentially
+  | json => throwUnexpected "quantifier" json
 
-instance : Deserializable Bound where
-  deserialize (json: Lean.Json) : DeserializeM Bound := match getInductive? json with
+def Bound.get : Deserialize Bound := fun json => match getInductive? json with
     | some ("Unbounded", Lean.Json.null) => Bound.unbounded
     | some ("Bounded", arr #[sgn, rel, expr]) => Bound.bounded
-        <$> deserialize sgn
-        <*> deserialize rel
-        <*> deserialize expr
+        <$> Sign.get sgn
+        <*> Tok.get rel
+        <*> Expr.get expr
     | _ => throwUnexpected "bound" json
 
 mutual
-  private partial def deserializeNP : Lean.Json -> DeserializeM NounPhrase
-    | arr #[adjL, noun, var?, adjR, stmt?] => NounPhrase.mk
-        <$> deserializeArr adjL
-        <*> deserialize noun
-        <*> deserialize? var?
-        <*> deserializeArr adjR
-        <*> deserializeStmt stmt?
+  private partial def getNP : Lean.Json -> DeserializeM NounPhrase
+    | arr #[arr adjL, noun, var?, arr adjR, stmt?] => NounPhrase.mk
+        <$> adjL.mapM AdjL.get
+        <*> Noun.get Term.get noun
+        <*> get? VarSymbol.get var?
+        <*> adjR.mapM AdjR.get
+        <*> get? getStmt stmt?
     | json => throwUnexpected "noun phrase" json
 
-    private partial def deserializeNPVars : Lean.Json -> DeserializeM NounPhraseVars
-    | arr #[adjL, noun, vars, adjR, stmt?] => NounPhraseVars.mk
-        <$> deserializeArr adjL
-        <*> deserialize noun
-        <*> deserializeArr vars
-        <*> deserializeArr adjR
-        <*> deserializeStmt stmt?
+  private partial def getNPVars : Lean.Json -> DeserializeM NounPhraseVars
+    | arr #[arr adjL, noun, arr vars, arr adjR, stmt?] => NounPhraseVars.mk
+        <$> adjL.mapM AdjL.get
+        <*> Noun.get Term.get noun
+        <*> vars.mapM VarSymbol.get
+        <*> adjR.mapM AdjR.get
+        <*> get? getStmt stmt?
     | json => throwUnexpected "noun phrase" json
 
-  private partial def deserializeQPhrase : Lean.Json -> DeserializeM QuantPhrase
-    | arr #[quant, np] => QuantPhrase.mk <$> deserialize quant <*> deserializeNPVars np
+  private partial def getQPhrase : Lean.Json -> DeserializeM QuantPhrase
+    | arr #[quant, np] => QuantPhrase.mk <$> Quantifier.get quant <*> getNPVars np
     | json => throwUnexpected "quantified phrase" json
 
-  private partial def deserializeStmt (json: Lean.Json) : DeserializeM Stmt := match getInductive? json with
-    | some ("StmtFormula", t) => Stmt.formula <$> deserialize t
+  private partial def getStmt (json: Lean.Json) : DeserializeM Stmt := match getInductive? json with
+    | some ("StmtFormula", t) => Stmt.formula <$> Formula.get t
     | some ("StmtVerbPhrase", arr #[term, verbPhrase]) => Stmt.verbPhrase
-        <$> deserialize term
-        <*> deserialize verbPhrase
+        <$> Term.get term
+        <*> VerbPhrase.get verbPhrase
     | some ("StmtNoun", arr #[term, np]) => Stmt.noun
-        <$> deserialize term
-        <*> deserializeNP np
-    | some ("StmtNeg", t) => Stmt.neg <$> deserializeStmt t
-    | some ("StmtExists", t) => Stmt.exists' <$> deserializeNPVars t
+        <$> Term.get term
+        <*> getNP np
+    | some ("StmtNeg", t) => Stmt.neg <$> getStmt t
+    | some ("StmtExists", t) => Stmt.exists' <$> getNPVars t
     | some ("StmtConnected", arr #[con, stmt, stmt']) => Stmt.connected
-        <$> deserialize con
-        <*> deserializeStmt stmt
-        <*> deserializeStmt stmt'
+        <$> Connective.get con
+        <*> getStmt stmt
+        <*> getStmt stmt'
     | some ("StmtQuantPhrase", arr #[qPhrase, stmt]) => Stmt.quantPhrase
-        <$> deserializeQPhrase qPhrase
-        <*> deserializeStmt stmt
-    | some ("SymbolicQuantified", arr #[quantifier, varSymbs, bound, suchThat, stmt]) => Stmt.symbolicQuantified
-        <$> deserialize quantifier
-        <*> deserializeArr varSymbs
-        <*> deserialize bound
-        <*> deserializeStmt suchThat
-        <*> deserializeStmt stmt
+        <$> getQPhrase qPhrase
+        <*> getStmt stmt
+    | some ("SymbolicQuantified", arr #[quantifier, arr varSymbs, bound, suchThat, stmt]) => Stmt.symbolicQuantified
+        <$> Quantifier.get quantifier
+        <*> varSymbs.mapM VarSymbol.get
+        <*> Bound.get bound
+        <*> getStmt suchThat
+        <*> getStmt stmt
     | _ => throwUnexpected "statement" json
 end
 
-instance : Deserializable NounPhrase := mk deserializeNP
-instance : Deserializable NounPhraseVars := mk deserializeNPVars
-instance : Deserializable QuantPhrase := mk deserializeQPhrase
-instance : Deserializable Stmt := mk deserializeStmt
+def NounPhrase.get := getNP
+def NounPhraseVars.get := getNPVars
+def QuantPhrase.get := getQPhrase
+def Stmt.get := getStmt
 
-instance : Deserializable DefnHead where
-  deserialize json := match getInductive? json with
-    | some ("DefnAdj", arr #[np, varSymb, adj]) => DefnHead.adj
-        <$> deserialize? np
-        <*> deserialize varSymb
-        <*> deserialize adj
-    | some ("DefnVerb", arr #[np, varSymb, verb]) => DefnHead.verb
-        <$> deserialize? np
-        <*> deserialize varSymb
-        <*> deserialize verb
-    | some ("DefnNoun", arr #[varSymb, noun]) => DefnHead.noun
-        <$> deserialize varSymb
-        <*> deserialize noun
-    | some ("DefnRel", arr #[varSymb, rel, varSymb']) => DefnHead.rel
-        <$> deserialize varSymb
-        <*> deserialize rel
-        <*> deserialize varSymb'
-    | some ("DefnSymbolicPredicate", arr #[symbPred, varSymbs]) => DefnHead.symbolicPredicate
-        <$> deserialize symbPred
-        <*> deserializeArr varSymbs
-    | _ => throwUnexpected "definition head" json
+def DefnHead.get : Deserialize DefnHead := fun json => match getInductive? json with
+  | some ("DefnAdj", arr #[np, varSymb, adj]) => DefnHead.adj
+      <$> get? NounPhrase.get np
+      <*> VarSymbol.get varSymb
+      <*> Adj.get VarSymbol.get adj
+  | some ("DefnVerb", arr #[np, varSymb, verb]) => DefnHead.verb
+      <$> get? NounPhrase.get np
+      <*> VarSymbol.get varSymb
+      <*> Verb.get VarSymbol.get verb
+  | some ("DefnNoun", arr #[varSymb, noun]) => DefnHead.noun
+      <$> VarSymbol.get varSymb
+      <*> Noun.get VarSymbol.get noun
+  | some ("DefnRel", arr #[varSymb, rel, varSymb']) => DefnHead.rel
+      <$> VarSymbol.get varSymb
+      <*> Tok.get rel
+      <*> VarSymbol.get varSymb'
+  | some ("DefnSymbolicPredicate", arr #[symbPred, arr varSymbs]) => DefnHead.symbolicPredicate
+      <$> SymbolicPredicate.get symbPred
+      <*> varSymbs.mapM VarSymbol.get
+  | _ => throwUnexpected "definition head" json
 
-instance : Deserializable Asm where
-  deserialize json := match getInductive? json with
-    | some ("AsmSuppose", stmt) => Asm.suppose <$> deserialize stmt
-    | some ("AsmLetNoun", arr #[vs, np]) => Asm.letNoun
-        <$> deserializeArr vs
-        <*> deserialize np
-    | some ("AsmLetIn", arr #[vs, expr]) => Asm.letIn
-        <$> deserializeArr vs
-        <*> deserialize expr
-    | some ("AsmLetThe", arr #[vs, fNoun]) => Asm.letThe
-        <$> deserialize vs
-        <*> deserialize fNoun
-    | some ("AsmLetEq", arr #[vs, expr]) => Asm.letEq
-        <$> deserialize vs
-        <*> deserialize expr
-    | _ => throwUnexpected "assumption" json
+def Asm.get : Deserialize Asm := fun json => match getInductive? json with
+  | some ("AsmSuppose", stmt) => Asm.suppose <$> Stmt.get stmt
+  | some ("AsmLetNoun", arr #[arr vs, np]) => Asm.letNoun
+      <$> vs.mapM VarSymbol.get
+      <*> NounPhrase.get np
+  | some ("AsmLetIn", arr #[arr vs, expr]) => Asm.letIn
+      <$> vs.mapM VarSymbol.get
+      <*> Expr.get expr
+  | some ("AsmLetThe", arr #[vs, fNoun]) => Asm.letThe
+      <$> VarSymbol.get vs
+      <*> Fun.get fNoun
+  | some ("AsmLetEq", arr #[vs, expr]) => Asm.letEq
+      <$> VarSymbol.get vs
+      <*> Expr.get expr
+  | _ => throwUnexpected "assumption" json
 
-instance : Deserializable Defn where
-  deserialize json := match getInductive? json with
-    | some ("Defn", arr #[asms, defnHead, stmt]) => Defn.defn
-        <$> deserializeArr asms
-        <*> deserialize defnHead
-        <*> deserialize stmt
-    | some ("DefnFun", arr #[asms, fNoun, term?, term]) => Defn.fun'
-        <$> deserializeArr asms
-        <*> deserialize fNoun
-        <*> deserialize? term?
-        <*> deserialize term
-    | _ => throwUnexpected "definition" json
+def Defn.get : Deserialize Defn := fun json => match getInductive? json with
+  | some ("Defn", arr #[arr asms, defnHead, stmt]) => Defn.defn
+      <$> asms.mapM Asm.get
+      <*> DefnHead.get defnHead
+      <*> Stmt.get stmt
+  | some ("DefnFun", arr #[arr asms, fNoun, term?, term]) => Defn.fun'
+      <$> asms.mapM Asm.get
+      <*> Fun.get fNoun
+      <*> get? Term.get term?
+      <*> Term.get term
+  | _ => throwUnexpected "definition" json
 
 -- instance : Deserializable Axiom where
---   deserialize json := match getInductive? json with
+--   get json := match getInductive? json with
 --     | some ("Axiom", arr #[asms, stmt]) => Axiom.mk
---         <$> deserialize asms
---         <*> deserialize stmt
+--         <$> get asms
+--         <*> get stmt
 --     | _ => throwUnexpected "axiom" json
 
-instance : Deserializable Lemma where
-  deserialize
-    | arr #[asms, stmt] => Lemma.mk
-        <$> deserializeArr asms
-        <*> deserialize stmt
-    | json => throwUnexpected "lemma" json
+def Lemma.get : Deserialize Lemma
+  | arr #[arr asms, stmt] => Lemma.mk
+      <$> asms.mapM Asm.get
+      <*> Stmt.get stmt
+  | json => throwUnexpected "lemma" json
 
-instance : Deserializable Para where
-  deserialize json := match getInductive? json with
-    | some ("ParaDefn", defn) => Para.defn' <$> deserialize defn
-    | some ("ParaLemma", arr #[tag, lem]) => Para.lemma' #[]
-        <$> deserialize lem
-    | _ => throwUnexpected "paragraph" json
-
--- Wow, removing the monad transformer typeclass from Deserialize
--- improves the compilation time of this from 3:25min to 1.5 sec.
--- It's still a lot, but I can work with it.
-
--- I guess the problem was that every usage of `deserialize` triggered
--- the typeclass instance problem for the monad transformer, since
--- the monad transformer was a typeclass parameter. But the profiler
--- says that the complexity lied in `compilation` not in
--- `typeclass inference`. I am still not sure what the issue was,
--- but maybe moving the typeclass parameter to an explicit param
--- of `deserialize` would also have solved the issue.
-
--- set_option profiler true
--- def deserialize' : DeserializeM Para := Deserializable.deserialize null
+def Para.get : Deserialize Para := fun json => match getInductive? json with
+  | some ("ParaDefn", defn) => Para.defn' <$> Defn.get defn
+  | some ("ParaLemma", arr #[tag, lem]) => Para.lemma' #[]
+      <$> Lemma.get lem
+  | _ => throwUnexpected "paragraph" json
