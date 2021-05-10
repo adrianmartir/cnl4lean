@@ -314,11 +314,11 @@ mutual
   partial instance meansNP : Means Grammar.NounPhrase (Expr -> MetaM Expr) where
     interpret
     | Grammar.NounPhrase.mk adjL noun varSymb? adjR stmt? => fun e => do
-      let base <- andN #[
-        <- interpret' meansAdjL adjL e,
-        <- interpret' meansNoun noun e,
-        <- interpret' meansAdjR adjR e
-        ]
+      let adjL <- andN (<- adjL.mapM (fun x => interpret' meansAdjL x e))
+      let adjR <- andN (<- adjR.mapM (fun x => interpret' meansAdjR x e))
+      let noun <- interpret' meansNoun noun e
+      let base <- andN #[adjL, noun, adjR]
+
       match varSymb?, stmt? with
       | _, none => base
       | none, some stmt => and base (<- interpret' meansStmt stmt)
@@ -340,10 +340,19 @@ mutual
     interpret
     | Grammar.NounPhraseVars.mk adjL noun varSymbs adjR stmt? => do
       let fvars := varSymbs.map interpret |>.map mkFVar
+
+      -- This should be refactored out since it is also used by `NounPhrase`.
+      -- But since we are currently using typeclasses to structure
+      -- interpretations it would be a bit akward.
+      let adjL (e: Expr) : MetaM Expr := do
+        andN (<- adjL.mapM (fun x => interpret' meansAdjL x e))
+      let adjR (e: Expr) : MetaM Expr := do
+        andN (<- adjR.mapM (fun x => interpret' meansAdjR x e))
+
       -- Apply the grammatical predictes to all of the free variables
       let nounProps <- fvars.mapM (interpret noun)
-      let adjLProps <- fvars.mapM (interpret adjL)
-      let adjRProps <- fvars.mapM (interpret adjR)
+      let adjLProps <- fvars.mapM adjL
+      let adjRProps <- fvars.mapM adjR
 
       let nounProp <- andN nounProps
       let adjLProp <- andN adjLProps
