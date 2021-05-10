@@ -53,16 +53,15 @@ instance : Inhabited (DeserializeM α) where
   default := throw arbitrary
 
 
-instance [Deserializable α] : Deserializable (Array α) where
-  deserialize
-    | arr a => a.mapM deserialize
-    | json => throwUnexpected "array" json
+
+def deserializeArr [Deserializable α] : Lean.Json -> DeserializeM (Array α)
+  | arr a => a.mapM deserialize
+  | json => throwUnexpected "array" json
 
 
-instance [Deserializable α] : Deserializable (Option α) where
-  deserialize
-    | Lean.Json.null => none
-    | json => some <$> deserialize json
+def deserialize? [Deserializable α] : Lean.Json -> DeserializeM (Option α)
+  | Lean.Json.null => none
+  | json => some <$> deserialize json
 
 -- We provide this instance in order to temporarily use do notation for
 -- `Option`.
@@ -113,6 +112,11 @@ instance : Deserializable VarSymbol where
     | some ("NamedVar", str t) => VarSymbol.namedVar t
     | some ("FreshVar", (n: Int)) => VarSymbol.freshVar n
     | _ => throwUnexpected "variable symbol" json
+
+instance : Deserializable Pattern where
+  deserialize
+    | arr a => a.mapM deserialize?
+    | json => throwUnexpected "pattern" json
 
 
 private partial def deserializeExpr (json: Lean.Json) : DeserializeM Expr := match getInductive? json with
@@ -264,19 +268,19 @@ instance : Deserializable Bound where
 mutual
   private partial def deserializeNP : Lean.Json -> DeserializeM NounPhrase
     | arr #[adjL, noun, var?, adjR, stmt?] => NounPhrase.mk
-        <$> deserialize adjL
+        <$> deserializeArr adjL
         <*> deserialize noun
-        <*> deserialize var?
-        <*> deserialize adjR
+        <*> deserialize? var?
+        <*> deserializeArr adjR
         <*> deserializeStmt stmt?
     | json => throwUnexpected "noun phrase" json
 
     private partial def deserializeNPVars : Lean.Json -> DeserializeM NounPhraseVars
     | arr #[adjL, noun, vars, adjR, stmt?] => NounPhraseVars.mk
-        <$> deserialize adjL
+        <$> deserializeArr adjL
         <*> deserialize noun
-        <*> deserialize vars
-        <*> deserialize adjR
+        <*> deserializeArr vars
+        <*> deserializeArr adjR
         <*> deserializeStmt stmt?
     | json => throwUnexpected "noun phrase" json
 
@@ -303,7 +307,7 @@ mutual
         <*> deserializeStmt stmt
     | some ("SymbolicQuantified", arr #[quantifier, varSymbs, bound, suchThat, stmt]) => Stmt.symbolicQuantified
         <$> deserialize quantifier
-        <*> deserialize varSymbs
+        <*> deserializeArr varSymbs
         <*> deserialize bound
         <*> deserializeStmt suchThat
         <*> deserializeStmt stmt
@@ -318,11 +322,11 @@ instance : Deserializable Stmt := mk deserializeStmt
 instance : Deserializable DefnHead where
   deserialize json := match getInductive? json with
     | some ("DefnAdj", arr #[np, varSymb, adj]) => DefnHead.adj
-        <$> deserialize np
+        <$> deserialize? np
         <*> deserialize varSymb
         <*> deserialize adj
     | some ("DefnVerb", arr #[np, varSymb, verb]) => DefnHead.verb
-        <$> deserialize np
+        <$> deserialize? np
         <*> deserialize varSymb
         <*> deserialize verb
     | some ("DefnNoun", arr #[varSymb, noun]) => DefnHead.noun
@@ -334,17 +338,17 @@ instance : Deserializable DefnHead where
         <*> deserialize varSymb'
     | some ("DefnSymbolicPredicate", arr #[symbPred, varSymbs]) => DefnHead.symbolicPredicate
         <$> deserialize symbPred
-        <*> deserialize varSymbs
+        <*> deserializeArr varSymbs
     | _ => throwUnexpected "definition head" json
 
 instance : Deserializable Asm where
   deserialize json := match getInductive? json with
     | some ("AsmSuppose", stmt) => Asm.suppose <$> deserialize stmt
     | some ("AsmLetNoun", arr #[vs, np]) => Asm.letNoun
-        <$> deserialize vs
+        <$> deserializeArr vs
         <*> deserialize np
     | some ("AsmLetIn", arr #[vs, expr]) => Asm.letIn
-        <$> deserialize vs
+        <$> deserializeArr vs
         <*> deserialize expr
     | some ("AsmLetThe", arr #[vs, fNoun]) => Asm.letThe
         <$> deserialize vs
@@ -357,13 +361,13 @@ instance : Deserializable Asm where
 instance : Deserializable Defn where
   deserialize json := match getInductive? json with
     | some ("Defn", arr #[asms, defnHead, stmt]) => Defn.defn
-        <$> deserialize asms
+        <$> deserializeArr asms
         <*> deserialize defnHead
         <*> deserialize stmt
     | some ("DefnFun", arr #[asms, fNoun, term?, term]) => Defn.fun'
-        <$> deserialize asms
+        <$> deserializeArr asms
         <*> deserialize fNoun
-        <*> deserialize term?
+        <*> deserialize? term?
         <*> deserialize term
     | _ => throwUnexpected "definition" json
 
@@ -377,16 +381,15 @@ instance : Deserializable Defn where
 instance : Deserializable Lemma where
   deserialize
     | arr #[asms, stmt] => Lemma.mk
-        <$> deserialize asms
+        <$> deserializeArr asms
         <*> deserialize stmt
     | json => throwUnexpected "lemma" json
 
 instance : Deserializable Para where
   deserialize json := match getInductive? json with
     | some ("ParaDefn", defn) => Para.defn' <$> deserialize defn
-    | some ("ParaLemma", arr #[tag, lem]) => Para.lemma'
-        <$> deserialize tag
-        <*> deserialize lem
+    | some ("ParaLemma", arr #[tag, lem]) => Para.lemma' #[]
+        <$> deserialize lem
     | _ => throwUnexpected "paragraph" json
 
 -- Wow, removing the monad transformer typeclass from Deserialize
