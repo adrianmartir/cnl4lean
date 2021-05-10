@@ -9,7 +9,6 @@ import CNL4Lean.Predef
 open Lean
 open Meta
 open CNL4Lean
-open Deserializable
 open DeserializationError
 
 -- At some point later, in the CLI interface or sth:
@@ -22,12 +21,8 @@ def json : DeserializeM Json := do
     | Except.ok json => json
     | Except.error msg => throw (parsingError msg)
 
-def getPara : DeserializeM Grammar.Para := json >>= deserialize
--- This should simply be lowered to IO and then run.
-
-
 def main' : IO Expr := do
-  let chain <- getPara.run
+  let chain <- json >>= Para.get |>.run
   match chain with
     | Except.error e => panic! (toString e)
     | Except.ok (Grammar.Para.lemma' _ lemma) =>

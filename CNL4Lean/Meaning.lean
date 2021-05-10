@@ -63,6 +63,7 @@ instance : Means Grammar.SymbolicPredicate (MetaM Name) where
       |> Name.mkSimple
       |> resolveGlobalConstNoOverload
 
+-- This only extracts the name, it does not look it up in the local context
 instance : Means Grammar.VarSymbol Name where
   interpret (var: Grammar.VarSymbol) : Name := match var with
   | Grammar.VarSymbol.namedVar name => Name.mkSimple name
@@ -102,7 +103,13 @@ private def interpretApp [m1: Means α (MetaM Name)] [m2: Means β (MetaM Expr)]
 
 partial instance meansE: Means Grammar.Expr (MetaM Expr) where
   interpret
-  | Grammar.Expr.var var => mkFVar <| interpret var
+  | Grammar.Expr.var varSymb => do
+    -- Inspired by `resolveLocalName` in `Elab/Term.lean`
+    let lctx <- getLCtx
+    let varSymb := interpret varSymb
+    match lctx.findFromUserName? varSymb with
+    | some ldecl => ldecl.toExpr
+    | none => throwError "Variable {varSymb} symbol not found in local context."
   | Grammar.Expr.int (Int.ofNat n) => mkNatLit n
   | Grammar.Expr.int _ => panic! "Integer literals can't be negative."
   -- The identifiers should be queried from the pattern definition tex labels.
@@ -235,6 +242,7 @@ instance meansAdjR: Means Grammar.AdjR (Expr -> MetaM Expr) where
 
 
 -- Eventually we want to support optional type annotations in binders (in `vars`)
+-- This seems to be a reimplementation of `withLocalDeclsD` in `Meta/Basic.lean`
 def inContext (vars: Array Name) (k: Array Expr -> MetaM α) : MetaM α :=
   let inCtx := vars.foldr (fun name k declaredFvars => do
     -- We declare the variable `name` and then run `k` in a context containing
@@ -277,6 +285,7 @@ def mkExistsFVars (fvars: Array Expr) (e: Expr) : MetaM Expr :=
 --     let e <- mkExistsFVars fvars f
 --     trace[Meta.debug] "Result: {e}"
 -- #eval test
+-- set_option trace.Meta.debug false
 
 instance meansQuant: Means Grammar.Quantifier (Array Expr -> Expr -> Expr -> MetaM Expr) where
   interpret
@@ -339,7 +348,7 @@ mutual
   partial instance meansNPV : Means Grammar.NounPhraseVars (MetaM Expr) where
     interpret
     | Grammar.NounPhraseVars.mk adjL noun varSymbs adjR stmt? => do
-      let fvars := varSymbs.map interpret |>.map mkFVar
+      let fvars <- varSymbs.map Grammar.Expr.var |>.mapM interpret
 
       -- This should be refactored out since it is also used by `NounPhrase`.
       -- But since we are currently using typeclasses to structure
@@ -392,9 +401,11 @@ mutual
         let varSymbs := np.vars.map interpret
 
         inContext varSymbs fun fvars => do
+          let lc <- getLCtx
+
+          -- We don't check that these are propositions since the quantification functions already implicitly check that.
           let np <- meansNPV.interpret np
           let stmt <- interpret' meansStmt stmt
-          -- We don't check that these are propositions since the quantification functions already implicitly check that.
 
           meansQuant.interpret quantifier fvars np stmt
 
@@ -420,6 +431,9 @@ end
 -- of type
 -- `(n:Nat) -> (m:Nat) -> (n >= m) -> Nat`
 -- This will probably take quite a bit of tweaking
+-- Hm, it seems like automatically resolving arguments like `n >= m`
+-- is a problem very similar to subtyping. I should search for `subtype`
+-- in the lean source code.
 
 -- Properties as type classes? This may give an automated way of handling properties silently, without having to pack and unpack structs or tuples all the time.
 def withAssumption (asm: Grammar.Asm) (e: Array Expr -> MetaM Expr) (fvars: Array Expr): MetaM Expr := match asm with

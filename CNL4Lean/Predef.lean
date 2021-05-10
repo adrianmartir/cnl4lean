@@ -12,3 +12,9 @@ def nor (p1: Prop) (p2: Prop) : Prop :=
 
 -- We can put the pattern -> lean translations here for now.
 -- Maybe later I have a better idea.
+
+constant Point : Type
+
+def point (x: Point) : Prop := True
+
+constant CongPred (x y z w: Point) : Prop

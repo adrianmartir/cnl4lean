@@ -18,6 +18,7 @@ structure GroupStr extends MonoidStr where
 instance : CoeSort SemigroupStr (Type u) where
   coe x := x.obj
 
+-- Do we want to be able to coerce monoids to semigroups?
 instance : CoeSort MonoidStr (Type u) where
   coe x := x.obj
 
