@@ -4,6 +4,7 @@ import CNL4Lean
 
 open Lean
 open Meta
+open Elab
 
 #eval "Hello, world!"
 
@@ -12,7 +13,6 @@ open Meta
 #check Environment.header
 #check Environment.add
 
--- Interestingly
 def defaultEnvironment : Environment := arbitrary
 
 #eval defaultEnvironment.header.moduleNames
@@ -412,6 +412,8 @@ def importTest : MetaM Unit := do
     -- This apparently is only for resolving namespaces, not constants.
     let ns <- resolveNamespace `Predef
     trace[Meta.debug] "namespace: {ns}"
+
+    let ns : TermElabM Syntax := `(#[])
   -- popScope
 
 

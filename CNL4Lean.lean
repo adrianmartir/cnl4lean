@@ -38,4 +38,4 @@ def main' : IO Expr := do
     | _ => panic! "The world is going to explode!!"
 
 
--- #eval main'
+#eval main'

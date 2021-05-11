@@ -42,12 +42,21 @@ instance [Inhabited β]: Inhabited (Means α β) where
 
 def interpret' [Inhabited β] (means : Means α β) := @interpret α β _ means
 
+-- We use our own proposition type in order to be able to use our own
+-- implementation of `True` that gets automatically reduced when applying
+-- logical operators. This is absolutely essential for the generated
+-- lemmata to be readable
+inductive Proposition where
+  | expr: Expr -> Proposition
+  | top: Proposition
+
+open Proposition
 
 instance : Means Grammar.Pattern (MetaM Name) where
   interpret pat :=
     pat.foldl (fun acc next => acc ++ toString next) ""
       |> Name.mkSimple
-      |> resolveGlobalConstNoOverload
+      |> resolveGlobalConstNoOverload -- Extract the lean-internal id
 
 instance : Means Grammar.SgPl (MetaM Name) where
   interpret pat := interpret pat.sg
@@ -125,32 +134,52 @@ partial instance meansE: Means Grammar.Expr (MetaM Expr) where
     -- higher order logic.
   | _ => throwError "const not implemented yet"
 
-def true: Expr := mkConst `True
 
-def not (e: Expr) : MetaM Expr := appN `Not #[e]
+def not : Proposition -> MetaM Proposition
+  | expr p => expr <$> appN `Not #[p]
+  | top => expr <$> mkConst `False
 
-def and (p1: Expr) (p2: Expr) : MetaM Expr := appN `And #[p1, p2]
+def and : Proposition -> Proposition -> MetaM Proposition
+  | expr p1, expr p2 => expr <$> appN `And #[p1, p2]
+  | top, p => p
+  | p, top => p
 
-def or (p1: Expr) (p2: Expr) : MetaM Expr := appN `Or #[p1, p2]
+def or : Proposition -> Proposition -> MetaM Proposition
+  | top, _ => top
+  | _, top => top
+  | expr p1, expr p2 => expr <$> appN `Or #[p1, p2]
 
-def andN (ps: Array Expr) : MetaM Expr := do
-  ps.foldlM and (<- true)
+def andN (ps: Array Proposition) : MetaM Proposition := do
+  ps.foldlM and top
 
-def implies (p1: Expr) (p2: Expr) : MetaM Expr :=
-  appN `implies #[p1, p2]
+def implies : Proposition -> Proposition -> MetaM Proposition
+  | _, top => top
+  | top, p => p
+  | expr p1, expr p2 => expr <$> appN `implies #[p1, p2]
 
-def iff (p1: Expr) (p2: Expr) : MetaM Expr :=
-  appN `Iff #[p1, p2]
+def iff : Proposition -> Proposition -> MetaM Proposition
+  | top, top => top
+  | top, p => p
+  | p, top => p
+  | expr p1, expr p2 => expr <$> appN `Iff #[p1, p2]
 
-def xor (p1: Expr) (p2: Expr) : MetaM Expr := do
-  -- `resolveGlobalConstNoOverload` expands the name according to current
-  -- open declarations.
-  appN (<- resolveGlobalConstNoOverload `xor) #[p1, p2]
 
-def nor (p1: Expr) (p2: Expr) : MetaM Expr := do
-  appN (<- resolveGlobalConstNoOverload `nor) #[p1, p2]
+def xor : Proposition -> Proposition -> MetaM Proposition
+  | top, top => expr <$> mkConst `False
+  | top, p => not p
+  | p, top => not p
+  | expr p1, expr p2 => do
+    let p <- appN (<- resolveGlobalConstNoOverload `xor) #[p1, p2]
+    expr p
 
-instance meansSgn: Means Grammar.Sign (Expr -> MetaM Expr) where
+def nor : Proposition -> Proposition -> MetaM Proposition
+  | top, _ => expr <$> mkConst `False
+  | _, top => expr <$> mkConst `False
+  | expr p1, expr p2 => do
+    let p <- appN (<- resolveGlobalConstNoOverload `nor) #[p1, p2]
+    expr p
+
+instance meansSgn: Means Grammar.Sign (Proposition -> MetaM Proposition) where
   interpret
   | Grammar.Sign.positive => pure
   | Grammar.Sign.negative => not
@@ -240,20 +269,9 @@ instance meansAdjR: Means Grammar.AdjR (Expr -> MetaM Expr) where
   | Grammar.AdjR.adjR pat args => mkPred pat args
   | Grammar.AdjR.attrRThat verbPhrase => interpret verbPhrase
 
-
 -- Eventually we want to support optional type annotations in binders (in `vars`)
--- This seems to be a reimplementation of `withLocalDeclsD` in `Meta/Basic.lean`
-def inContext (vars: Array Name) (k: Array Expr -> MetaM α) : MetaM α :=
-  let inCtx := vars.foldr (fun name k declaredFvars => do
-    -- We declare the variable `name` and then run `k` in a context containing
-    -- this new free variable.
-    let u <- mkFreshLevelMVar
-    let type <- mkFreshExprMVar (mkSort u)
-    withLocalDecl name BinderInfo.default type fun fvar =>
-      k (declaredFvars.push fvar)) k
-
-  -- For some reason we can't directly curry this.
-  inCtx #[]
+def inContext [Inhabited α] (vars: Array Name) (k: Array Expr -> MetaM α) : MetaM α :=
+  withLocalDeclsD (vars.map (fun v => (v,fun _ => mkFreshTypeMVar))) k
 
 
 instance meansCon: Means Grammar.Connective (Expr -> Expr -> MetaM Expr) where
@@ -272,20 +290,6 @@ def mkExistsFVars (fvars: Array Expr) (e: Expr) : MetaM Expr :=
     -- We use `mkAppM` since we need to instantiate an implicit argument.
     mkAppM `Exists #[typeFamily]) e
 
--- Wohoo, this works!!
--- set_option trace.Meta.debug true
--- def test : MetaM Unit := do
---   let lc <- getLCtx
---   trace[Meta.debug] "before: {lc.getFVarIds}"
---   inContext #[`x, `y] fun fvars => do
---     let lc <- getLCtx
---     trace[Meta.debug] "after: {lc.getFVarIds}"
-
---     let f <- appN `And #[fvars[0], fvars[1]]
---     let e <- mkExistsFVars fvars f
---     trace[Meta.debug] "Result: {e}"
--- #eval test
--- set_option trace.Meta.debug false
 
 instance meansQuant: Means Grammar.Quantifier (Array Expr -> Expr -> Expr -> MetaM Expr) where
   interpret
@@ -440,7 +444,7 @@ def withAssumption (asm: Grammar.Asm) (e: Array Expr -> MetaM Expr) (fvars: Arra
   | Grammar.Asm.suppose stmt => do
     -- This should be a (dependent) lambda abstraction in general
     let (condition : Expr) <- interpret stmt
-    withLocalDecl (<- mkFreshId) (BinderInfo.default) condition fun fvar =>
+    withLocalDeclD (<- mkFreshId) condition fun fvar =>
       e (fvars.push fvar)
 
   | Grammar.Asm.letNoun varSymbs np => do
@@ -448,7 +452,7 @@ def withAssumption (asm: Grammar.Asm) (e: Array Expr -> MetaM Expr) (fvars: Arra
     inContext varSymbs fun newVars => do
       let pred := interpret np
       let conditions <- andN (<- newVars.mapM pred)
-      withLocalDecl (<- mkFreshId) (BinderInfo.default) conditions fun fvar =>
+      withLocalDeclD (<- mkFreshId) conditions fun fvar =>
         e (fvars.append newVars |>.push fvar)
       -- Finally we need to (dependently) lambda abstract the free variables and proofs of the predicates and run `e` in that ctx.
   -- | Grammar.Asm.letIn varSymbs type => do
