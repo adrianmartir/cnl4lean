@@ -1,7 +1,6 @@
 
-import CNL4Lean.Grammar
 import Lean
-
+import CNL4Lean.Grammar
 
 namespace CNL4Lean
 -- This is a painfully boring deserialization module.

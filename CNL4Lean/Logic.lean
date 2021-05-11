@@ -15,13 +15,6 @@ inductive Proposition where
   | expr: Lean.Expr -> Proposition
   | top: Proposition
 
-open Proposition
-
-def Proposition.run (f : Lean.Expr -> α) (p: Proposition) : α :=
-  match p with
-  | expr e => f e
-  | top => f (mkConst `True)
-
 -- Simple unifying application.
 -- * Doesn't deal with different argument types
 -- * No coercions
@@ -29,7 +22,7 @@ def Proposition.run (f : Lean.Expr -> α) (p: Proposition) : α :=
 -- * No synthetic metavariables
 -- The lean application implementation is in `Elab/App.lean` and it has
 -- **a lot** more features.
-private def app (f: Lean.Expr) (arg: Lean.Expr) : MetaM Lean.Expr := do
+def app (f: Lean.Expr) (arg: Lean.Expr) : MetaM Lean.Expr := do
   let fType <- inferType f
   let dom <- fType.bindingDomain!
   let type <- inferType arg
@@ -37,17 +30,33 @@ private def app (f: Lean.Expr) (arg: Lean.Expr) : MetaM Lean.Expr := do
   mkApp f arg
 
 -- Copied from `AppBuilder.lean`. Instantiates universe parameters.
-private def mkFun (constName : Name) : MetaM (Lean.Expr × Lean.Expr) := do
+def mkFun (constName : Name) : MetaM (Lean.Expr × Lean.Expr) := do
   let cinfo ← getConstInfo constName
   let us ← cinfo.levelParams.mapM fun _ => mkFreshLevelMVar
   let f := mkConst constName us
   let fType := cinfo.instantiateTypeLevelParams us
   return (f, fType)
 
-private def appN (ident: Name) (args: Array Lean.Expr) : MetaM Lean.Expr := do
+def appN (ident: Name) (args: Array Lean.Expr) : MetaM Lean.Expr := do
   let f <- mkFun ident
   args.foldlM (fun f arg => app f arg) f.1
 
+
+def mkExistsFVars' (fvars: Array Lean.Expr) (e: Lean.Expr) : MetaM Lean.Expr :=
+  fvars.foldrM (fun fvar acc => do
+    let typeFamily <- mkLambdaFVars #[fvar] acc
+    -- We use `mkAppM` since we need to instantiate an implicit argument.
+    mkAppM `Exists #[typeFamily]) e
+
+namespace Proposition
+
+instance : Inhabited Proposition where
+  default := top
+
+def run  (p: Proposition) : Lean.Expr :=
+  match p with
+  | expr e => e
+  | top => mkConst `True
 
 def not : Proposition -> MetaM Proposition
   | expr p => expr <$> appN `Not #[p]
@@ -92,3 +101,12 @@ def nor : Proposition -> Proposition -> MetaM Proposition
   | expr p1, expr p2 => do
     let p <- appN (<- resolveGlobalConstNoOverload `nor) #[p1, p2]
     expr p
+
+def mkExistsFVars (fvars: Array Lean.Expr) (p: Proposition) : MetaM Proposition :=
+   expr <$> mkExistsFVars' fvars p.run
+
+def mkForallFVars (fvars: Array Lean.Expr) (p: Proposition) : MetaM Proposition := match p with
+  | expr e => expr <$> Meta.mkForallFVars fvars e
+  | top => top
+
+end Proposition

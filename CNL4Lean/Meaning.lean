@@ -10,7 +10,7 @@ namespace CNL4Lean
 
 open Lean hiding Expr
 open Lean.Meta
-open Logic
+open Proposition
 
 -- In this module I use the `MetaM` monad as a logic framework that exposes leans
 -- internals. I decided against using the `TermElabM` monad, because it contains many
@@ -162,47 +162,38 @@ def inContext [Inhabited α] (vars: Array Name) (k: Array Lean.Expr -> MetaM α)
 
 
 def Connective.interpret : Connective -> Proposition -> Proposition -> MetaM Proposition
-  | Connective.conjunction => and
-  | Connective.disjunction => or
-  | Connective.implication => implies
-  | Connective.equivalence => iff
-  | Connective.exclusiveOr => xor
-  | Connective.negatedDisjunction => nor
+  | conjunction => and
+  | disjunction => or
+  | implication => implies
+  | equivalence => iff
+  | exclusiveOr => xor
+  | negatedDisjunction => nor
 
 
-def mkExistsFVars' (fvars: Array Lean.Expr) (e: Lean.Expr) : MetaM Lean.Expr :=
-  fvars.foldrM (fun fvar acc => do
-    let typeFamily <- mkLambdaFVars #[fvar] acc
-    -- We use `mkAppM` since we need to instantiate an implicit argument.
-    mkAppM `Exists #[typeFamily]) e
-
-def mkExistsFVars (fvars: Array Lean.Expr) (p: Proposition) : MetaM Proposition := expr <$> Proposition.run (mkExistsFVars' fvars) p
-
-def Quantifier.interpret : Quantifier -> Array Lean.Expr -> Lean.Expr -> Lean.Expr -> MetaM Lean.Expr
+def Quantifier.interpret : Quantifier -> Array Lean.Expr -> Proposition -> Proposition -> MetaM Proposition
   -- For the quantifiers, we assume that we are abstracting free variables that
   -- already are in context.
   -- `For all green gadgets $x$ we have $p$.`
   -- -> `∀x. green(x) → p`
-  | Quantifier.universally => fun fvars bound claim => do
+  | universally => fun fvars bound claim => do
   -- `implies` ensures that the input is actually a proposition.
-    mkForallFVars fvars (<- implies bound claim)
+    Proposition.mkForallFVars fvars (<- implies bound claim)
 
   -- `For some blue gadget $x$ we have $p$.`
   -- -> `∃x. blue(x) ∧ p`
-  | Quantifier.existentially => fun fvars bound claim => do
+  | existentially => fun fvars bound claim => do
     mkExistsFVars fvars (<- and bound claim)
 
-  | Quantifier.nonexistentially => fun fvars bound claim => do
+  | nonexistentially => fun fvars bound claim => do
     let exists' <- mkExistsFVars fvars (<- and bound claim)
     not exists'
 
 
-instance meansBound: Means Bound (Expr -> MetaM Expr) where
-  interpret
-  | Bound.unbounded => fun e => true
-  | Bound.bounded sgn relator expr => fun e => do
-    let bound <- appN (<- interpret relator) #[e, <- interpret expr]
-    interpret' meansSgn sgn bound
+def Bound.interpret : Bound -> Lean.Expr -> MetaM Proposition
+  | unbounded, e => top
+  | bounded sgn relator e2, e1 => do
+    let bound <- appN (<- relator.interpret) #[e1, <- e2.interpret]
+    sgn.interpret (expr bound)
 
 mutual
   -- Ex: `[Aut(M) is] a simple group $G$ such that the order $G$ is odd.`
@@ -210,46 +201,44 @@ mutual
   -- The statement at the end interprets to an expression (not dependent on another expression!)
   -- So we abstract abstract the free variable `G` and also make it into a map
   -- `Expr -> Expr`.
-  partial instance meansNP : Means NounPhrase (Expr -> MetaM Expr) where
-    interpret
+  partial def interpretNP : NounPhrase -> Lean.Expr -> MetaM Proposition
     | NounPhrase.mk adjL noun varSymb? adjR stmt? => fun e => do
-      let adjL <- andN (<- adjL.mapM (fun x => interpret' meansAdjL x e))
-      let adjR <- andN (<- adjR.mapM (fun x => interpret' meansAdjR x e))
-      let noun <- interpret' meansNoun noun e
+      let adjL <- andN (<- adjL.mapM (fun x => x.interpret e))
+      let adjR <- andN (<- adjR.mapM (fun x => x.interpret e))
+      let noun <- noun.interpret e
       let base <- andN #[adjL, noun, adjR]
 
       match varSymb?, stmt? with
       | _, none => base
-      | none, some stmt => and base (<- interpret' meansStmt stmt)
+      | none, some stmt => and base (<- interpretStmt stmt)
       | some varSymb, some stmt => do
         let u <- mkFreshLevelMVar
         let varType <- mkFreshExprMVar (mkSort u)
 
-        let stmtLambda <- withLocalDecl (interpret varSymb) BinderInfo.default varType fun fvar => do
-          let stmt <- interpret' meansStmt stmt
-          mkLambdaFVars #[fvar] stmt
+        let stmtLambda <- withLocalDecl (varSymb.interpret) BinderInfo.default varType fun fvar => do
+          let stmt <- interpretStmt stmt
+          mkLambdaFVars #[fvar] stmt.run
 
-        and base (<- app stmtLambda e)
+        and base (expr <| <- app stmtLambda e)
 
   -- This is a proposition that needs to be interpreted with the variable
   -- symbols already in context. See example for `Stmt.quantPhrase`.
 
   -- Warning: This behaves very differently from `NounPhrase`
-  partial instance meansNPV : Means NounPhraseVars (MetaM Expr) where
-    interpret
+  partial def interpretNPV : NounPhraseVars -> MetaM Proposition
     | NounPhraseVars.mk adjL noun varSymbs adjR stmt? => do
-      let fvars <- varSymbs.map Expr.var |>.mapM interpret
+      let fvars <- varSymbs.map Expr.var |>.mapM (fun v => v.interpret)
 
       -- This should be refactored out since it is also used by `NounPhrase`.
       -- But since we are currently using typeclasses to structure
       -- interpretations it would be a bit akward.
-      let adjL (e: Expr) : MetaM Expr := do
-        andN (<- adjL.mapM (fun x => interpret' meansAdjL x e))
-      let adjR (e: Expr) : MetaM Expr := do
-        andN (<- adjR.mapM (fun x => interpret' meansAdjR x e))
+      let adjL (e: Lean.Expr) : MetaM Proposition := do
+        andN (<- adjL.mapM (fun x => x.interpret e))
+      let adjR (e: Lean.Expr) : MetaM Proposition := do
+        andN (<- adjR.mapM (fun x => x.interpret e))
 
       -- Apply the grammatical predictes to all of the free variables
-      let nounProps <- fvars.mapM (interpret noun)
+      let nounProps <- fvars.mapM noun.interpret
       let adjLProps <- fvars.mapM adjL
       let adjRProps <- fvars.mapM adjR
 
@@ -259,60 +248,59 @@ mutual
 
       match stmt? with
       | some stmt => do
-        let stmt <- interpret' meansStmt stmt
+        let stmt <- interpretStmt stmt
         andN #[nounProp, adjLProp, adjRProp, stmt]
       | noun => andN #[nounProp, adjLProp, adjRProp]
 
 
-  partial instance meansStmt : Means Stmt (MetaM Expr) where
-    interpret
-    | Stmt.formula f => interpret f
-    | Stmt.verbPhrase term vp => do
-      let term <- interpret term
-      meansVP.interpret vp term
+  partial def interpretStmt : Stmt -> MetaM Proposition
+    | Stmt.formula f => f.interpret
+    | Stmt.verbPhrase term vp => do vp.interpret (<- term.interpret)
 
     -- Ex: `[Aut(M) is] a simple group $G$ such that the order $G$ is odd.`
-    | Stmt.noun term np => do
-      let term <- interpret term
-      meansNP.interpret np term
-    | Stmt.neg stmt => do not (<- interpret' meansStmt stmt)
+    | Stmt.noun term np => do interpretNP np (<- term.interpret)
+    | Stmt.neg stmt => do not (<- interpretStmt stmt)
     | Stmt.exists' np => do
-        let varSymbs := np.vars.map interpret
+        let varSymbs := VarSymbol.interpretArr np.vars
         inContext varSymbs fun fvars => do
-          mkExistsFVars fvars (<- meansNPV.interpret np)
+          mkExistsFVars fvars (<- interpretNPV np)
 
     | Stmt.connected connective stmt1 stmt2 => do
-      let stmt1 <- interpret' meansStmt stmt1
-      let stmt2 <- interpret' meansStmt stmt2
-      meansCon.interpret connective stmt1 stmt2
+      let stmt1 <- interpretStmt stmt1
+      let stmt2 <- interpretStmt stmt2
+      connective.interpret stmt1 stmt2
 
     -- Ex: `For all/some/no points $a,b$ we have $p(a,b)$.`
     | Stmt.quantPhrase (QuantPhrase.mk quantifier np) stmt => do
-        let varSymbs := np.vars.map interpret
+        let varSymbs := VarSymbol.interpretArr np.vars
 
         inContext varSymbs fun fvars => do
           let lc <- getLCtx
 
           -- We don't check that these are propositions since the quantification functions already implicitly check that.
-          let np <- meansNPV.interpret np
-          let stmt <- interpret' meansStmt stmt
+          let np <- interpretNPV np
+          let stmt <- interpretStmt stmt
 
-          meansQuant.interpret quantifier fvars np stmt
+          quantifier.interpret fvars np stmt
 
     -- Ex: `for all $d ∈ S$ such that $d \divides m, n$, we have that $d = 1$.`
     | Stmt.symbolicQuantified quantifier varSymbs bound suchThat? claim => do
-      let varSymbs := varSymbs.map interpret
+      let varSymbs := VarSymbol.interpretArr varSymbs
 
       inContext varSymbs fun fvars => do
-        let bounds <- fvars.mapM (meansBound.interpret bound)
+        let bounds <- fvars.mapM bound.interpret
         let suchThat <- match suchThat? with
-          | some stmt => interpret' meansStmt stmt
-          | none => true
+          | some stmt => interpretStmt stmt
+          | none => top
 
         let condition <- and (<- andN bounds) suchThat
-        let claim <- interpret' meansStmt claim
-        meansQuant.interpret quantifier fvars condition claim
+        let claim <- interpretStmt claim
+        quantifier.interpret fvars condition claim
 end
+
+def NounPhrase.interpret := interpretNP
+def NounPhraseVars.interpret := interpretNPV
+def Stmt.interpret := interpretStmt
 
 -- Run `MetaM Expr` with a given assumption.
 -- Ex: `Let $n,m$ be natural numbers. Let $n >= m$. The difference of $n$ and $m$ is $n - m$.`
@@ -326,20 +314,24 @@ end
 -- in the lean source code.
 
 -- Properties as type classes? This may give an automated way of handling properties silently, without having to pack and unpack structs or tuples all the time.
-def withAssumption (asm: Asm) (e: Array Expr -> MetaM Expr) (fvars: Array Expr): MetaM Expr := match asm with
+def withAssumption [Inhabited α] (asm: Asm) (e: Array Lean.Expr -> MetaM α) (fvars: Array Lean.Expr): MetaM α := match asm with
   | Asm.suppose stmt => do
     -- This should be a (dependent) lambda abstraction in general
-    let (condition : Expr) <- interpret stmt
-    withLocalDeclD (<- mkFreshId) condition fun fvar =>
-      e (fvars.push fvar)
+    let condition <- stmt.interpret
+    match condition with
+    | expr condition => withLocalDeclD (<- mkFreshId) condition fun fvar => e (fvars.push fvar)
+    | top => e fvars
 
   | Asm.letNoun varSymbs np => do
-    let varSymbs := varSymbs.map interpret
+    let varSymbs := VarSymbol.interpretArr varSymbs
     inContext varSymbs fun newVars => do
-      let pred := interpret np
+      let pred := np.interpret
       let conditions <- andN (<- newVars.mapM pred)
-      withLocalDeclD (<- mkFreshId) conditions fun fvar =>
-        e (fvars.append newVars |>.push fvar)
+
+      match conditions with
+      | expr conditions => withLocalDeclD (<- mkFreshId) conditions fun fvar =>
+                              e (fvars.append newVars |>.push fvar)
+      | top => e fvars
       -- Finally we need to (dependently) lambda abstract the free variables and proofs of the predicates and run `e` in that ctx.
   -- | Asm.letIn varSymbs type => do
   --   -- let type <- interpret type
@@ -349,23 +341,21 @@ def withAssumption (asm: Asm) (e: Array Expr -> MetaM Expr) (fvars: Array Expr):
 -- Hm, not sure whether I should `mkForallFVars` all at once
 -- in the end or do it at every `withAssumption` step.
 -- Note: For definitions it is really easy to do envision an implementation of implicit arguments(since we specify the ones that should be explicit in the pattern), but for lemmas it is harder.
-instance: Means Lemma (MetaM Expr) where
-  interpret
+def Lemma.interpret : Lemma -> MetaM Proposition
   | Lemma.mk asms stmt =>
     let f := asms.foldr withAssumption (fun fvars => do
-      let stmt <- interpret stmt
-      mkForallFVars fvars stmt)
+      let stmt <- stmt.interpret
+      Proposition.mkForallFVars fvars stmt)
     f #[]
 
 -- This should yield an environment of declarations.
 -- def interpretPara (p: Para) : MetaM Unit := sorry
-instance: Means Para (MetaM Unit) where
-  interpret
+def Para.interpret : Para -> MetaM Unit
   | Para.defn' defn => sorry
     -- Defintions can be auto-named by patterns
   | Para.lemma' tag lemma => do
-    let lemma <- interpret lemma
-    let type <- inferType lemma
+    let lemma <- lemma.interpret
+    let type <- inferType lemma.run
 
     -- Environment.add sth
     -- Lemmas *cannot* be auto-named
