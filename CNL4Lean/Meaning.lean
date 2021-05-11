@@ -469,3 +469,13 @@ instance: Means Grammar.Lemma (MetaM Expr) where
 
 -- This should yield an environment of declarations.
 -- def interpretPara (p: Grammar.Para) : MetaM Unit := sorry
+instance: Means Grammar.Para (MetaM Unit) where
+  interpret
+  | Grammar.Para.defn' defn => sorry
+    -- Defintions can be auto-named by patterns
+  | Grammar.Para.lemma' tag lemma => do
+    let lemma <- interpret lemma
+    let type <- inferType lemma
+
+    -- Environment.add sth
+    -- Lemmas *cannot* be auto-named
