@@ -2,6 +2,7 @@
 import Lean
 import CNL4Lean.Grammar
 import CNL4Lean.Deserialize
+import CNL4Lean.Proposition
 import CNL4Lean.Meaning
 import CNL4Lean.Predef
 
@@ -38,4 +39,4 @@ def main' : IO Expr := do
     | _ => panic! "The world is going to explode!!"
 
 
-#eval main'
+-- #eval main'

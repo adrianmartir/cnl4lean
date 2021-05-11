@@ -1,5 +1,6 @@
 
 import CNL4Lean.Grammar
+import CNL4Lean.Proposition
 import Lean
 -- The goal is to create a dummy file and to write all the natural constructs to it.
 -- Then, can I somehow make the environment into an `.olean` file? I am not sure how
@@ -7,77 +8,39 @@ import Lean
 
 namespace CNL4Lean
 
-open Lean
+open Lean hiding Expr
 open Lean.Meta
 
 -- In this module I use the `MetaM` monad as a logic framework that exposes leans
--- internals. I decided against using the `Grammar.TermElabM` monad, because it contains many
+-- internals. I decided against using the `TermElabM` monad, because it contains many
 -- lean-specific mechanisms, like macro expansion and debugging. Most of the instances
--- for `Grammar.TermElabM` contain lean-specific `Syntax` objects or macro stuff.
-
--- In any case, I will probably need to read the `Grammar.TermElabM` monad source code and copy
--- some of the patterns I see there.
-
--- For instance, I will need to learn
--- * How to create metavariables for types to be inferred (For now I could make all types explicit)
--- * Namespacing and modules (this seems to be quite confusing)
-
--- It might be worth looking at `elabOpen` and `elabGrammar.Term` in `Elab/Grammar.Term.lean`.
-
--- This is the main typeclass we structure our interpretation code around
--- After writing quite a lot of code with it I realize that this way of
--- structuring code in lean is quite cumbersome, since we can't use it for things
--- like recursive definitions and currying - so we end up explicitly passing
--- instance implementations half of the time. We would probably be better off without this typeclass.
-class Means (α: Type) (β: Type) [Inhabited β] where
-  interpret : α -> β
-
-open Means
-
--- The following two definitions are used in order to write partial
--- instances of `Means`, since currently instances and `partial`
--- don't get along.
-instance [Inhabited β]: Inhabited (Means α β) where
-  default := mk fun x => arbitrary
-
-def interpret' [Inhabited β] (means : Means α β) := @interpret α β _ means
-
--- We use our own proposition type in order to be able to use our own
--- implementation of `True` that gets automatically reduced when applying
--- logical operators. This is absolutely essential for the generated
--- lemmata to be readable
-inductive Proposition where
-  | expr: Expr -> Proposition
-  | top: Proposition
+-- for `TermElabM` contain lean-specific `Syntax` objects or macro stuff.
 
 open Proposition
 
-instance : Means Grammar.Pattern (MetaM Name) where
-  interpret pat :=
+def Pattern.interpret (pat : Pattern) : MetaM Name :=
     pat.foldl (fun acc next => acc ++ toString next) ""
-      |> Name.mkSimple
-      |> resolveGlobalConstNoOverload -- Extract the lean-internal id
-
-instance : Means Grammar.SgPl (MetaM Name) where
-  interpret pat := interpret pat.sg
-
-instance : Means Grammar.Relator (MetaM Name) where
-  interpret rel := toString rel ++ "Rel"
       |> Name.mkSimple
       |> resolveGlobalConstNoOverload
 
-instance : Means Grammar.SymbolicPredicate (MetaM Name) where
-  interpret
-  | Grammar.SymbolicPredicate.mk s _ =>  toString s ++ "Pred"
+def SgPl.interpret (pat: SgPl) : MetaM Name := pat.sg.interpret
+
+def Relator.interpret (rel: Relator) : MetaM Name := toString rel ++ "Rel"
+      |> Name.mkSimple
+      |> resolveGlobalConstNoOverload
+
+def SymbolicPredicate.interpret : SymbolicPredicate -> MetaM Name
+  | SymbolicPredicate.mk s _ =>  toString s ++ "Pred"
       |> Name.mkSimple
       |> resolveGlobalConstNoOverload
 
 -- This only extracts the name, it does not look it up in the local context
-instance : Means Grammar.VarSymbol Name where
-  interpret (var: Grammar.VarSymbol) : Name := match var with
-  | Grammar.VarSymbol.namedVar name => Name.mkSimple name
+def VarSymbol.interpret (var: VarSymbol) : Name := match var with
+  | VarSymbol.namedVar name => Name.mkSimple name
   | _ => `thisShouldNotHappen -- I think this rarely occurs
 
+def VarSymbol.interpretArr (a: Array VarSymbol) : Array Name :=
+  a.map (fun x => x.interpret)
 
 -- Simple unifying application.
 -- * Doesn't deal with different argument types
@@ -86,7 +49,7 @@ instance : Means Grammar.VarSymbol Name where
 -- * No synthetic metavariables
 -- The lean application implementation is in `Elab/App.lean` and it has
 -- **a lot** more features.
-private def app (f: Expr) (arg: Expr) : MetaM Expr := do
+private def app (f: Lean.Expr) (arg: Lean.Expr) : MetaM Lean.Expr := do
   let fType <- inferType f
   let dom <- fType.bindingDomain!
   let type <- inferType arg
@@ -94,40 +57,35 @@ private def app (f: Expr) (arg: Expr) : MetaM Expr := do
   mkApp f arg
 
 -- Copied from `AppBuilder.lean`. Instantiates universe parameters.
-private def mkFun (constName : Name) : MetaM (Expr × Expr) := do
+private def mkFun (constName : Name) : MetaM (Lean.Expr × Lean.Expr) := do
   let cinfo ← getConstInfo constName
   let us ← cinfo.levelParams.mapM fun _ => mkFreshLevelMVar
   let f := mkConst constName us
   let fType := cinfo.instantiateTypeLevelParams us
   return (f, fType)
 
-private def appN (ident: Name) (args: Array Expr) : MetaM Expr := do
+private def appN (ident: Name) (args: Array Lean.Expr) : MetaM Lean.Expr := do
   let f <- mkFun ident
   args.foldlM (fun f arg => app f arg) f.1
 
 
-private def interpretApp [m1: Means α (MetaM Name)] [m2: Means β (MetaM Expr)] (ident: α) (args: Array β) : MetaM Expr := do
-  appN (<- interpret ident) (<- args.mapM interpret)
-
-
-partial instance meansE: Means Grammar.Expr (MetaM Expr) where
-  interpret
-  | Grammar.Expr.var varSymb => do
+partial def Expr.interpret : Expr -> MetaM Lean.Expr
+  | var varSymb => do
     -- Inspired by `resolveLocalName` in `Elab/Term.lean`
     let lctx <- getLCtx
-    let varSymb := interpret varSymb
+    let varSymb := varSymb.interpret
     match lctx.findFromUserName? varSymb with
     | some ldecl => ldecl.toExpr
     | none => throwError "Variable {varSymb} symbol not found in local context."
-  | Grammar.Expr.int (Int.ofNat n) => mkNatLit n
-  | Grammar.Expr.int _ => panic! "Integer literals can't be negative."
+  | int (Int.ofNat n) => mkNatLit n
+  | int _ => panic! "Integer literals can't be negative."
   -- The identifiers should be queried from the pattern definition tex labels.
   -- (at least theoretically)
-  | Grammar.Expr.mixfix symb args => do
+  | mixfix symb args => do
     -- Can't use `interpretApp` here, because (due to a bug?) we can't pass explicit instances to it.
-    let args <- args.mapM (interpret' meansE)
-    appN (<- interpret symb) args
-  | Grammar.Expr.app _ _ => throwError "app not implemented yet"
+    let args <- args.mapM (fun e => e.interpret)
+    appN (<- symb.interpret) args
+  | app _ _ => throwError "app not implemented yet"
     -- We want a dumbed-down application here(no implicits).
     -- Typeclasses should be merely a **notational** construct - which in
     -- CNL has gets handled in *patterns*. This should be only for doing
@@ -179,142 +137,142 @@ def nor : Proposition -> Proposition -> MetaM Proposition
     let p <- appN (<- resolveGlobalConstNoOverload `nor) #[p1, p2]
     expr p
 
-instance meansSgn: Means Grammar.Sign (Proposition -> MetaM Proposition) where
-  interpret
-  | Grammar.Sign.positive => pure
-  | Grammar.Sign.negative => not
+def Sign.interpret : Sign -> Proposition -> MetaM Proposition
+  | positive => pure
+  | negative => not
 
-private def interpretRel (lhs: Array Grammar.Expr) (sgn : Grammar.Sign) (rel: Grammar.Relator) (rhs: Array Grammar.Expr): MetaM Expr := do
-    let relator <- interpret rel
-    let lhs <- lhs.mapM interpret
-    let rhs <- rhs.mapM interpret
+def Chain.interpretStep (lhs: Array Expr) (sgn : Sign) (rel: Relator) (rhs: Array Expr): MetaM Proposition := do
+    let relator <- rel.interpret
+    let lhs <- lhs.mapM (fun x => x.interpret)
+    let rhs <- rhs.mapM (fun x => x.interpret)
 
-    let mut acc := true
+    let mut acc := top
     for l in lhs do
       for r in rhs do
-        let head <- appN relator #[l, r]
+        let head <- expr <$> appN relator #[l, r]
         let acc <- and head acc
 
-    interpret' meansSgn sgn acc
+    sgn.interpret acc
 
-partial instance meansC : Means Grammar.Chain (MetaM Expr) where
-  interpret
-  | Grammar.Chain.chainBase lhs sgn rel rhs =>
-    interpretRel lhs sgn rel rhs
-  | Grammar.Chain.chainCons lhs sgn rel tail => do
+partial def Chain.interpret : Chain -> MetaM Proposition
+  | chainBase lhs sgn rel rhs => interpretStep lhs sgn rel rhs
+  | chainCons lhs sgn rel tail => do
     let head <- match tail with
-    | Grammar.Chain.chainBase rhs _ _ _ =>
-      interpretRel lhs sgn rel rhs
-    | Grammar.Chain.chainCons rhs _ _ _ =>
-      interpretRel lhs sgn rel rhs
-    let tail <- interpret' meansC tail
+    | chainBase rhs _ _ _ => interpretStep lhs sgn rel rhs
+    | chainCons rhs _ _ _ => interpretStep lhs sgn rel rhs
+    let tail <- tail.interpret
 
     and head tail
 
-instance : Means Grammar.Formula (MetaM Expr) where
-  interpret
-  | Grammar.Formula.chain chain => interpret chain
-  | Grammar.Formula.predicate p args => do appN (<- interpret p) (<- args.mapM interpret)
+def Formula.interpret : Formula -> MetaM Proposition
+  | chain c => c.interpret
+  | predicate p args => do
+    let args <- args.mapM (fun arg => arg.interpret)
+    expr <$> appN (<- p.interpret) args
 
 mutual
   -- Patterns add indirection.
-  partial instance meansF : Means Grammar.Fun (MetaM Expr) where
-    interpret
-    | Grammar.Fun.mk lexicalPhrase args =>
-        interpretApp (m2 := meansT) lexicalPhrase args
+  partial def interpretFun : Fun -> MetaM Lean.Expr
+    | Fun.mk lexicalPhrase args => do
+        let args <- args.mapM interpretTerm
+        appN (<- lexicalPhrase.interpret) args
 
-  partial instance meansT : Means Grammar.Term (MetaM Expr) where
-    interpret
-    | Grammar.Term.expr e => interpret e
-    | Grammar.Term.function f => interpret' meansF f
+  partial def interpretTerm : Term -> MetaM Lean.Expr
+    | Term.expr e => e.interpret
+    | Term.function f => interpretFun f
 end
 
+def Fun.interpret := interpretFun
+def Term.interpret := interpretTerm
+def Term.interpretArr (a: Array Term) : MetaM (Array Lean.Expr) :=
+  a.mapM (fun x => x.interpret)
 
-private def mkPred [m1: Means α (MetaM Name)] [m2: Means β (MetaM Expr)] (ident: α) (args: Array β) (e: Expr) : MetaM Expr := do
-    let p <- interpretApp ident args
-    app p e
+-- TODO: We should have certain predicates that get short-circuited to `top`,
+-- for instance if they only exist for the purposes of type inference.
+private def mkPred (ident: Name) (args: Array Lean.Expr) (e: Lean.Expr) : MetaM Proposition := do
+    let p <- appN ident args
+    expr <$> app p e
+
+-- private def mkPredV (ident: Name) (args: Array VarSymbol) (e: Lean.Expr) : MetaM Lean.Expr := do
+--     let p <- appN ident (VarSymbol.interpretArr args)
+--     app p e
 
 -- We encode many of these grammatical constructs as functions `α -> MetaM Expr`, `e ↦ p(x1,...,xn , e)`.
 -- This could have been done by using actual functions *inside* lean, but that
 -- meant that I had to deal with implicit arguments/polymorphism when applying connectives.
--- Moreover, the outup this setup produces should be much more readable.
-instance meansNoun [Means α (MetaM Expr)]: Means (Grammar.Noun α) (Expr -> MetaM Expr) where
-  interpret
-  | Grammar.Noun.mk sgPl args => mkPred sgPl args
+-- Moreover, the output this setup produces should be much more readable.
+def Noun.interpret : Noun Term -> Lean.Expr -> MetaM Proposition
+  | mk sgPl args, e => do
+    mkPred (<- sgPl.interpret) (<- Term.interpretArr args) e
 
-instance meansAdj [Means α (MetaM Expr)]: Means (Grammar.Adj α) (Expr -> MetaM Expr) where
-  interpret
-  | Grammar.Adj.mk pat args => mkPred pat args
+def Adj.interpret : Adj Term -> Lean.Expr -> MetaM Proposition
+  | mk sgPl args, e => do
+    mkPred (<- sgPl.interpret) (<- Term.interpretArr args) e
 
-instance meansVerb [Means α (MetaM Expr)]: Means (Grammar.Verb α) (Expr -> MetaM Expr) where
-  interpret
-  | Grammar.Verb.mk sgPl args => mkPred sgPl args
+def Verb.interpret : Verb Term -> Lean.Expr -> MetaM Proposition
+  | mk sgPl args, e => do
+    mkPred (<- sgPl.interpret) (<- Term.interpretArr args) e
 
-instance meansVP: Means Grammar.VerbPhrase (Expr -> MetaM Expr) where
-  interpret
-  | Grammar.VerbPhrase.verb verb => interpret verb
-  | Grammar.VerbPhrase.adj adj => interpret adj
-  -- For some reason we also need explicit instances here.
-  | Grammar.VerbPhrase.verbNot verb => fun e => do
-    not (<- interpret' meansVerb verb e)
-  | Grammar.VerbPhrase.adjNot adj => fun e => do
-    not (<- interpret' meansAdj adj e)
+def VerbPhrase.interpret : VerbPhrase -> Lean.Expr -> MetaM Proposition
+  | verb v, e => v.interpret e
+  | VerbPhrase.adj a, e => a.interpret e
+  | verbNot v, e => do not (<- v.interpret e)
+  | adjNot a, e => do not (<- a.interpret e)
 
-instance meansAdjL: Means Grammar.AdjL (Expr -> MetaM Expr) where
-  interpret
-  | Grammar.AdjL.mk pat args => mkPred pat args
+def AdjL.interpret : AdjL -> Lean.Expr -> MetaM Proposition
+  | mk pat args, e => do
+    mkPred (<- pat.interpret) (<- Term.interpretArr args) e
 
-instance meansAdjR: Means Grammar.AdjR (Expr -> MetaM Expr) where
-  interpret
-  | Grammar.AdjR.adjR pat args => mkPred pat args
-  | Grammar.AdjR.attrRThat verbPhrase => interpret verbPhrase
+def AdjR.interpret : AdjR -> Lean.Expr -> MetaM Proposition
+  | adjR pat args, e => do
+    mkPred (<- pat.interpret) (<- Term.interpretArr args) e
+  | attrRThat verbPhrase, e => verbPhrase.interpret e
 
 -- Eventually we want to support optional type annotations in binders (in `vars`)
-def inContext [Inhabited α] (vars: Array Name) (k: Array Expr -> MetaM α) : MetaM α :=
+def inContext [Inhabited α] (vars: Array Name) (k: Array Lean.Expr -> MetaM α) : MetaM α :=
   withLocalDeclsD (vars.map (fun v => (v,fun _ => mkFreshTypeMVar))) k
 
 
-instance meansCon: Means Grammar.Connective (Expr -> Expr -> MetaM Expr) where
-  interpret
-  | Grammar.Connective.conjunction => and
-  | Grammar.Connective.disjunction => or
-  | Grammar.Connective.implication => implies
-  | Grammar.Connective.equivalence => iff
-  | Grammar.Connective.exclusiveOr => xor
-  | Grammar.Connective.negatedDisjunction => nor
+def Connective.interpret : Connective -> Proposition -> Proposition -> MetaM Proposition
+  | Connective.conjunction => and
+  | Connective.disjunction => or
+  | Connective.implication => implies
+  | Connective.equivalence => iff
+  | Connective.exclusiveOr => xor
+  | Connective.negatedDisjunction => nor
 
 
-def mkExistsFVars (fvars: Array Expr) (e: Expr) : MetaM Expr :=
+def mkExistsFVars' (fvars: Array Lean.Expr) (e: Lean.Expr) : MetaM Lean.Expr :=
   fvars.foldrM (fun fvar acc => do
     let typeFamily <- mkLambdaFVars #[fvar] acc
     -- We use `mkAppM` since we need to instantiate an implicit argument.
     mkAppM `Exists #[typeFamily]) e
 
+def mkExistsFVars (fvars: Array Lean.Expr) (p: Proposition) : MetaM Proposition := expr <$> Proposition.run (mkExistsFVars' fvars) p
 
-instance meansQuant: Means Grammar.Quantifier (Array Expr -> Expr -> Expr -> MetaM Expr) where
-  interpret
+def Quantifier.interpret : Quantifier -> Array Lean.Expr -> Lean.Expr -> Lean.Expr -> MetaM Lean.Expr
   -- For the quantifiers, we assume that we are abstracting free variables that
   -- already are in context.
   -- `For all green gadgets $x$ we have $p$.`
   -- -> `∀x. green(x) → p`
-  | Grammar.Quantifier.universally => fun fvars bound claim => do
+  | Quantifier.universally => fun fvars bound claim => do
   -- `implies` ensures that the input is actually a proposition.
     mkForallFVars fvars (<- implies bound claim)
 
   -- `For some blue gadget $x$ we have $p$.`
   -- -> `∃x. blue(x) ∧ p`
-  | Grammar.Quantifier.existentially => fun fvars bound claim => do
+  | Quantifier.existentially => fun fvars bound claim => do
     mkExistsFVars fvars (<- and bound claim)
 
-  | Grammar.Quantifier.nonexistentially => fun fvars bound claim => do
+  | Quantifier.nonexistentially => fun fvars bound claim => do
     let exists' <- mkExistsFVars fvars (<- and bound claim)
     not exists'
 
 
-instance meansBound: Means Grammar.Bound (Expr -> MetaM Expr) where
+instance meansBound: Means Bound (Expr -> MetaM Expr) where
   interpret
-  | Grammar.Bound.unbounded => fun e => true
-  | Grammar.Bound.bounded sgn relator expr => fun e => do
+  | Bound.unbounded => fun e => true
+  | Bound.bounded sgn relator expr => fun e => do
     let bound <- appN (<- interpret relator) #[e, <- interpret expr]
     interpret' meansSgn sgn bound
 
@@ -324,9 +282,9 @@ mutual
   -- The statement at the end interprets to an expression (not dependent on another expression!)
   -- So we abstract abstract the free variable `G` and also make it into a map
   -- `Expr -> Expr`.
-  partial instance meansNP : Means Grammar.NounPhrase (Expr -> MetaM Expr) where
+  partial instance meansNP : Means NounPhrase (Expr -> MetaM Expr) where
     interpret
-    | Grammar.NounPhrase.mk adjL noun varSymb? adjR stmt? => fun e => do
+    | NounPhrase.mk adjL noun varSymb? adjR stmt? => fun e => do
       let adjL <- andN (<- adjL.mapM (fun x => interpret' meansAdjL x e))
       let adjR <- andN (<- adjR.mapM (fun x => interpret' meansAdjR x e))
       let noun <- interpret' meansNoun noun e
@@ -349,10 +307,10 @@ mutual
   -- symbols already in context. See example for `Stmt.quantPhrase`.
 
   -- Warning: This behaves very differently from `NounPhrase`
-  partial instance meansNPV : Means Grammar.NounPhraseVars (MetaM Expr) where
+  partial instance meansNPV : Means NounPhraseVars (MetaM Expr) where
     interpret
-    | Grammar.NounPhraseVars.mk adjL noun varSymbs adjR stmt? => do
-      let fvars <- varSymbs.map Grammar.Expr.var |>.mapM interpret
+    | NounPhraseVars.mk adjL noun varSymbs adjR stmt? => do
+      let fvars <- varSymbs.map Expr.var |>.mapM interpret
 
       -- This should be refactored out since it is also used by `NounPhrase`.
       -- But since we are currently using typeclasses to structure
@@ -378,30 +336,30 @@ mutual
       | noun => andN #[nounProp, adjLProp, adjRProp]
 
 
-  partial instance meansStmt : Means Grammar.Stmt (MetaM Expr) where
+  partial instance meansStmt : Means Stmt (MetaM Expr) where
     interpret
-    | Grammar.Stmt.formula f => interpret f
-    | Grammar.Stmt.verbPhrase term vp => do
+    | Stmt.formula f => interpret f
+    | Stmt.verbPhrase term vp => do
       let term <- interpret term
       meansVP.interpret vp term
 
     -- Ex: `[Aut(M) is] a simple group $G$ such that the order $G$ is odd.`
-    | Grammar.Stmt.noun term np => do
+    | Stmt.noun term np => do
       let term <- interpret term
       meansNP.interpret np term
-    | Grammar.Stmt.neg stmt => do not (<- interpret' meansStmt stmt)
-    | Grammar.Stmt.exists' np => do
+    | Stmt.neg stmt => do not (<- interpret' meansStmt stmt)
+    | Stmt.exists' np => do
         let varSymbs := np.vars.map interpret
         inContext varSymbs fun fvars => do
           mkExistsFVars fvars (<- meansNPV.interpret np)
 
-    | Grammar.Stmt.connected connective stmt1 stmt2 => do
+    | Stmt.connected connective stmt1 stmt2 => do
       let stmt1 <- interpret' meansStmt stmt1
       let stmt2 <- interpret' meansStmt stmt2
       meansCon.interpret connective stmt1 stmt2
 
     -- Ex: `For all/some/no points $a,b$ we have $p(a,b)$.`
-    | Grammar.Stmt.quantPhrase (Grammar.QuantPhrase.mk quantifier np) stmt => do
+    | Stmt.quantPhrase (QuantPhrase.mk quantifier np) stmt => do
         let varSymbs := np.vars.map interpret
 
         inContext varSymbs fun fvars => do
@@ -414,7 +372,7 @@ mutual
           meansQuant.interpret quantifier fvars np stmt
 
     -- Ex: `for all $d ∈ S$ such that $d \divides m, n$, we have that $d = 1$.`
-    | Grammar.Stmt.symbolicQuantified quantifier varSymbs bound suchThat? claim => do
+    | Stmt.symbolicQuantified quantifier varSymbs bound suchThat? claim => do
       let varSymbs := varSymbs.map interpret
 
       inContext varSymbs fun fvars => do
@@ -440,14 +398,14 @@ end
 -- in the lean source code.
 
 -- Properties as type classes? This may give an automated way of handling properties silently, without having to pack and unpack structs or tuples all the time.
-def withAssumption (asm: Grammar.Asm) (e: Array Expr -> MetaM Expr) (fvars: Array Expr): MetaM Expr := match asm with
-  | Grammar.Asm.suppose stmt => do
+def withAssumption (asm: Asm) (e: Array Expr -> MetaM Expr) (fvars: Array Expr): MetaM Expr := match asm with
+  | Asm.suppose stmt => do
     -- This should be a (dependent) lambda abstraction in general
     let (condition : Expr) <- interpret stmt
     withLocalDeclD (<- mkFreshId) condition fun fvar =>
       e (fvars.push fvar)
 
-  | Grammar.Asm.letNoun varSymbs np => do
+  | Asm.letNoun varSymbs np => do
     let varSymbs := varSymbs.map interpret
     inContext varSymbs fun newVars => do
       let pred := interpret np
@@ -455,7 +413,7 @@ def withAssumption (asm: Grammar.Asm) (e: Array Expr -> MetaM Expr) (fvars: Arra
       withLocalDeclD (<- mkFreshId) conditions fun fvar =>
         e (fvars.append newVars |>.push fvar)
       -- Finally we need to (dependently) lambda abstract the free variables and proofs of the predicates and run `e` in that ctx.
-  -- | Grammar.Asm.letIn varSymbs type => do
+  -- | Asm.letIn varSymbs type => do
   --   -- let type <- interpret type
   --   sorry
   | _ => throwError "asm not implemented yet"
@@ -463,21 +421,21 @@ def withAssumption (asm: Grammar.Asm) (e: Array Expr -> MetaM Expr) (fvars: Arra
 -- Hm, not sure whether I should `mkForallFVars` all at once
 -- in the end or do it at every `withAssumption` step.
 -- Note: For definitions it is really easy to do envision an implementation of implicit arguments(since we specify the ones that should be explicit in the pattern), but for lemmas it is harder.
-instance: Means Grammar.Lemma (MetaM Expr) where
+instance: Means Lemma (MetaM Expr) where
   interpret
-  | Grammar.Lemma.mk asms stmt =>
+  | Lemma.mk asms stmt =>
     let f := asms.foldr withAssumption (fun fvars => do
       let stmt <- interpret stmt
       mkForallFVars fvars stmt)
     f #[]
 
 -- This should yield an environment of declarations.
--- def interpretPara (p: Grammar.Para) : MetaM Unit := sorry
-instance: Means Grammar.Para (MetaM Unit) where
+-- def interpretPara (p: Para) : MetaM Unit := sorry
+instance: Means Para (MetaM Unit) where
   interpret
-  | Grammar.Para.defn' defn => sorry
+  | Para.defn' defn => sorry
     -- Defintions can be auto-named by patterns
-  | Grammar.Para.lemma' tag lemma => do
+  | Para.lemma' tag lemma => do
     let lemma <- interpret lemma
     let type <- inferType lemma
 

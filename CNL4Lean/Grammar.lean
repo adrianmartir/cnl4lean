@@ -1,5 +1,5 @@
 
-namespace CNL4Lean.Grammar
+namespace CNL4Lean
 
 -- In order to make deserialization more streamlined painless, we disregard
 -- lean naming conventions and use the Haskell naming conventions
