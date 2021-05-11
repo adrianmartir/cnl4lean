@@ -1,6 +1,6 @@
 
 import CNL4Lean.Grammar
-import CNL4Lean.Proposition
+import CNL4Lean.Logic
 import Lean
 -- The goal is to create a dummy file and to write all the natural constructs to it.
 -- Then, can I somehow make the environment into an `.olean` file? I am not sure how
@@ -10,13 +10,13 @@ namespace CNL4Lean
 
 open Lean hiding Expr
 open Lean.Meta
+open Logic
 
 -- In this module I use the `MetaM` monad as a logic framework that exposes leans
 -- internals. I decided against using the `TermElabM` monad, because it contains many
 -- lean-specific mechanisms, like macro expansion and debugging. Most of the instances
 -- for `TermElabM` contain lean-specific `Syntax` objects or macro stuff.
 
-open Proposition
 
 def Pattern.interpret (pat : Pattern) : MetaM Name :=
     pat.foldl (fun acc next => acc ++ toString next) ""
@@ -42,33 +42,6 @@ def VarSymbol.interpret (var: VarSymbol) : Name := match var with
 def VarSymbol.interpretArr (a: Array VarSymbol) : Array Name :=
   a.map (fun x => x.interpret)
 
--- Simple unifying application.
--- * Doesn't deal with different argument types
--- * No coercions
--- * No propagating expected type for smarter coercions
--- * No synthetic metavariables
--- The lean application implementation is in `Elab/App.lean` and it has
--- **a lot** more features.
-private def app (f: Lean.Expr) (arg: Lean.Expr) : MetaM Lean.Expr := do
-  let fType <- inferType f
-  let dom <- fType.bindingDomain!
-  let type <- inferType arg
-  unless <- isDefEq dom type do throwError "Expected type {dom}, got {type}"
-  mkApp f arg
-
--- Copied from `AppBuilder.lean`. Instantiates universe parameters.
-private def mkFun (constName : Name) : MetaM (Lean.Expr × Lean.Expr) := do
-  let cinfo ← getConstInfo constName
-  let us ← cinfo.levelParams.mapM fun _ => mkFreshLevelMVar
-  let f := mkConst constName us
-  let fType := cinfo.instantiateTypeLevelParams us
-  return (f, fType)
-
-private def appN (ident: Name) (args: Array Lean.Expr) : MetaM Lean.Expr := do
-  let f <- mkFun ident
-  args.foldlM (fun f arg => app f arg) f.1
-
-
 partial def Expr.interpret : Expr -> MetaM Lean.Expr
   | var varSymb => do
     -- Inspired by `resolveLocalName` in `Elab/Term.lean`
@@ -91,51 +64,6 @@ partial def Expr.interpret : Expr -> MetaM Lean.Expr
     -- CNL has gets handled in *patterns*. This should be only for doing
     -- higher order logic.
   | _ => throwError "const not implemented yet"
-
-
-def not : Proposition -> MetaM Proposition
-  | expr p => expr <$> appN `Not #[p]
-  | top => expr <$> mkConst `False
-
-def and : Proposition -> Proposition -> MetaM Proposition
-  | expr p1, expr p2 => expr <$> appN `And #[p1, p2]
-  | top, p => p
-  | p, top => p
-
-def or : Proposition -> Proposition -> MetaM Proposition
-  | top, _ => top
-  | _, top => top
-  | expr p1, expr p2 => expr <$> appN `Or #[p1, p2]
-
-def andN (ps: Array Proposition) : MetaM Proposition := do
-  ps.foldlM and top
-
-def implies : Proposition -> Proposition -> MetaM Proposition
-  | _, top => top
-  | top, p => p
-  | expr p1, expr p2 => expr <$> appN `implies #[p1, p2]
-
-def iff : Proposition -> Proposition -> MetaM Proposition
-  | top, top => top
-  | top, p => p
-  | p, top => p
-  | expr p1, expr p2 => expr <$> appN `Iff #[p1, p2]
-
-
-def xor : Proposition -> Proposition -> MetaM Proposition
-  | top, top => expr <$> mkConst `False
-  | top, p => not p
-  | p, top => not p
-  | expr p1, expr p2 => do
-    let p <- appN (<- resolveGlobalConstNoOverload `xor) #[p1, p2]
-    expr p
-
-def nor : Proposition -> Proposition -> MetaM Proposition
-  | top, _ => expr <$> mkConst `False
-  | _, top => expr <$> mkConst `False
-  | expr p1, expr p2 => do
-    let p <- appN (<- resolveGlobalConstNoOverload `nor) #[p1, p2]
-    expr p
 
 def Sign.interpret : Sign -> Proposition -> MetaM Proposition
   | positive => pure
