@@ -313,7 +313,7 @@ def Stmt.interpret := interpretStmt
 -- is a problem very similar to subtyping. I should search for `subtype`
 -- in the lean source code.
 
--- Properties as type classes? This may give an automated way of handling properties silently, without having to pack and unpack structs or tuples all the time.
+-- Properties as type classes? This may give an automated way of handling properties silently, without having to pack and unpack structs or tuples all the time. I think it would be most simple if we simply call `TermElabM` on sth like ``(function param1 param2)` from here in order to trigger coercions and typeclass instantiations. It is nice and low-effort and it should work extremely well. And we get nice error messages, e.g. metavariable hole error messages.
 def withAssumption [Inhabited α] (asm: Asm) (e: Array Lean.Expr -> MetaM α) (fvars: Array Lean.Expr): MetaM α := match asm with
   | Asm.suppose stmt => do
     -- This should be a (dependent) lambda abstraction in general
@@ -348,14 +348,38 @@ def Lemma.interpret : Lemma -> MetaM Proposition
       Proposition.mkForallFVars fvars stmt)
     f #[]
 
+def Defn.interpret : Defn -> MetaM Lean.Expr := fun d =>
+  throwError "Not implemented"
+
+def Tag.interpret : Tag -> Name
+  | none => `noNameFound
+  | some arr => arr.foldl
+    (fun acc next => String.append acc (String.capitalize <| toString next)) ""
+    |> Name.mkSimple
+
 -- This should yield an environment of declarations.
 -- def interpretPara (p: Para) : MetaM Unit := sorry
+-- If I run into problems at some point(since I can't say I understand
+-- reducibility hints or the different `ConstantInfo` constructors),
+-- I can read the source of `Elab/PreDefinition/Main.lean`.
 def Para.interpret : Para -> MetaM Unit
-  | Para.defn' defn => sorry
-    -- Defintions can be auto-named by patterns
+  | Para.defn' defn => do
+    let defn <- defn.interpret
+    -- TODO: Do this properly
+    let prop <- inferType defn
+
+    -- TODO: Name definition by using its pattern
+    -- TODO: Think about level parameters
+    let defn := mkDefinitionValEx `test [] prop defn ReducibilityHints.opaque DefinitionSafety.safe
+    modifyEnv (fun e => e.add (ConstantInfo.defnInfo defn))
+
   | Para.lemma' tag lemma => do
     let lemma <- lemma.interpret
-    let type <- inferType lemma.run
+    let lemma := lemma.run
+    -- This should always be a proposition
+    let prop <- inferType lemma
+    -- Lemmas are propositions, so we can simply add them as
+    -- propositions to the envirionment
 
-    -- Environment.add sth
-    -- Lemmas *cannot* be auto-named
+    let lemma := mkDefinitionValEx tag.interpret [] prop lemma ReducibilityHints.«abbrev» DefinitionSafety.safe
+    modifyEnv (fun e => e.add (ConstantInfo.defnInfo lemma))

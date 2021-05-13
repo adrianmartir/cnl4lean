@@ -186,6 +186,7 @@ variable (S : Type u)
 -- These seem to be equivalent
 #check (α: Type) -> Array α
 #check forall (α : Type u), Array α = Array S
+#check Int -> Int = Int
 
 #check forall α, Array α
 
@@ -415,6 +416,3 @@ def importTest : MetaM Unit := do
 
     let ns : TermElabM Syntax := `(#[])
   -- popScope
-
-
-#eval importTest

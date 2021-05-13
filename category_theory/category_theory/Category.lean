@@ -145,7 +145,7 @@ structure functor (C : hom_struct) [category C] (D : hom_struct) [category D] wh
 -- is nonsensical. One should construct the whole struct in natural language and then
 -- claim it forms a category.
 
--- For the sake of simplicity, I will avoid using typeclasses in CNL for now. The 
+-- For the sake of simplicity, I will avoid using typeclasses in CNL for now. The
 -- formalization will treat categories as a struct. I also guess that for now
 -- arguments should be always explicit.
 attribute [simp] functor.map_id functor.map_comp
@@ -224,7 +224,7 @@ instance functor_cat.category : category (functor_cat C D) := {
     intro { app := η, naturality := _ }
     apply nat_ext
     simp [id', id_trans, comp, vcomp]
-  assoc := by 
+  assoc := by
     intro F G H K
     intro { app := f, naturality := _ }
     intro { app := g, naturality := _ }
