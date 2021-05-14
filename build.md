@@ -23,6 +23,10 @@ In order for editor support to work, one might have to fork the nix build pipeli
 
 Note that scanning can still be done in parallel, thus at quite a low cost.
 
+THE ABOVE IS BOGUS, SINCE THE PARSE TREE DOES NOT CONTAIN ASSOCIATIVITY PROPERTIES ANYMORE, THEY CAN ONLY BE KNOWN FROM THE SCANNER.
+
+Also note that this dicussion implies that definition identifiers should *not ever be manually named*, but that they should be automatically generated. If one would insist on manually naming definitions(<-> patterns), one could always auto-insert an alias.
+
 ---
 
 ## Some notes on how lean 4 building works
@@ -55,3 +59,54 @@ The `nix/buildLeanPackage.nix` file also contains various other derivations:
 ### Building modules inside a package
 
 It seems like this is again based on the `LEAN_PATH` environment variable. Thus one might have hope of writing a straightforward modification/overlay of our nix flake. It seems like the key thing would be overriding the `lean` executable to instead point to a shell script with a dumbed-down `lean` command of my own, that runs Adrian's parser and my logic processing when required.
+
+Let's look a bit closer into `nix/buildLeanPackage` and its defined fields
+
+#### `allExternalDeps`
+
+This seems to be a map of `name -> derivation` for all of the packages we depend on. We can inpect this list by looking at the `dep-root` derivations:
+
+`ls /nix/store/ | grep 'dep-root' | head` gives us a few to choose from, and if we look at one, we see that it only contains toplevel package dependencies.
+
+
+
+#### `leanDeps`
+
+Is a derivation building a `-deps` file for **every module** (not just top-level dependencies). This file contains a list of modules a given module depends on. One can again look at examples by running `ls /nix/store/ | grep 'deps' | head`.
+
+Note that when building this file, we can provide a custom lean package `lean-leanDeps` for printing dependencies, so we could modify this to also accept `.lean.tex` files.
+
+Note: we can manually print deps with
+`print-lean-deps/bin/print-lean-deps < ReadableLean.lean`
+
+after having built the `print-lean-paths` component with
+
+`nix build .#print-lean-deps -o print-lean-deps`
+
+---
+
+It seems like reusing this lean 4's nix infrastructure doesn't work. The problem occurs when printing lean dependencies with `lean --deps`. Even we fixed that command to also support `.lean.tex` files, we still have the problem that `lean --deps` strips the file extension for all its modules. This file extension is recovered when actually defining the derivation `buildMod`, but of course that will fail for `.lean.tex` files.
+
+One could 'trick' nix into doing running `lean` on non-`.lean` files anyways by renaming our files to have the `.lean` extension.
+
+Patching the existing path-printing and compiling machinery seemed like a hack anyways...
+
+One could write completely new path-printing and building machinery as separate executables and then write a nix file similar to `buildLeanPackage.nix` that does almost the same thing but also enabling `.lean.tex`. But we also have to do things like scanning, parsing and interpreting manually, so it would really add some complexity.
+
+---
+
+One should write a function analogous `buildMod`, but exclusively for `.lean.tex` files and producing only `.olean` files, lets call such a function `buildTexMod`. Note that at this point there no dependency handling yet, as `buildMod` takes a module name *and* an explicit list of dependencies as input. I will probably have to copy `buildMod` into my own nix file and write `buildTexMod`.
+
+---
+
+No. There is a much simpler way. Rewriting(*and mantaining!*) the build system is kind of a pain. Moreover it means that even for compiling *regular .lean modules*, that have `.lean.tex` modules as dependencies, we need a completely new `lean --deps`. This is unreasonable.
+
+There is a much simpler way of completely reusing lean 4's build system: We don't compile `.lean.tex` to modules, but rather we choose to dynamically read those files by using a `processReadableLean [sourceFile]` command macro.
+
+Then a build system could emulate creating `.olean` files directly by autogenerating a `.lean` file containing the `processReadableLean [sourceFile]` command.
+
+### Vocabularies
+
+What about vocabularies? These seem to justify having a completely new build system, since the `.lean.tex` files seem to need to contain dependency information in order to build vocabularies.
+
+ARGGGHHHHHHHHHHHHHHHH I hate this. The hacky idea I had above does not seem so good anymore... There does not seem to be an easy solution to all my problems... I'll look at this tomorrow again...
