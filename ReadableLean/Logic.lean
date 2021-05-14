@@ -2,7 +2,7 @@
 import Lean
 
 -- Some utilities for manipulating lean expressions
-namespace CNL4Lean
+namespace ReadableLean
 
 open Lean hiding Expr
 open Lean.Meta

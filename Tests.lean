@@ -1,6 +1,6 @@
 
 import Lean
-import CNL4Lean
+import ReadableLean
 
 open Lean
 open Meta
@@ -380,7 +380,7 @@ def importTest : MetaM Unit := do
   -- We might want to throw out more modules out of the env in order to remove
   -- unnecessary garbage.
   -- We might want to manually compile `Predef` to an `.olean` file in the future.
-  let env <- importModules [{module := `CNL4Lean.Predef}] Options.empty
+  let env <- importModules [{module := `ReadableLean.Predef}] Options.empty
   modifyEnv (fun _ => env)
 
   let a := env.constants.size
@@ -389,12 +389,12 @@ def importTest : MetaM Unit := do
   -- let m := (<- getEnv).allImportedModuleNames
   -- trace[Meta.debug] "all imported {m}"
 
-  let s <- getConstInfo `CNL4Lean.Predef.xor
+  let s <- getConstInfo `ReadableLean.Predef.xor
   let type <- s.type
   trace[Meta.debug] "type of xor: {type}"
 
   -- pushScope
-  withTheReader Core.Context (fun ctx => { ctx with openDecls := [OpenDecl.simple `CNL4Lean [], OpenDecl.simple `CNL4Lean.Predef []] }) do
+  withTheReader Core.Context (fun ctx => { ctx with openDecls := [OpenDecl.simple `ReadableLean [], OpenDecl.simple `ReadableLean.Predef []] }) do
     let o <- getOpenDecls
     trace[Meta.debug] "open declarations: {o}"
 

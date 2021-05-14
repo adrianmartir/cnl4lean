@@ -1,5 +1,5 @@
 
-namespace CNL4Lean.Predef
+namespace ReadableLean.Predef
 -- This file contains the builtin lean constants.
 -- Somehow disable prelude when reading this?
 

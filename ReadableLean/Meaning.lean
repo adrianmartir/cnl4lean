@@ -1,12 +1,12 @@
 
-import CNL4Lean.Grammar
-import CNL4Lean.Logic
+import ReadableLean.Grammar
+import ReadableLean.Logic
 import Lean
 -- The goal is to create a dummy file and to write all the natural constructs to it.
 -- Then, can I somehow make the environment into an `.olean` file? I am not sure how
 -- this would work.
 
-namespace CNL4Lean
+namespace ReadableLean
 
 open Lean hiding Expr
 open Lean.Meta
