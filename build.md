@@ -110,3 +110,11 @@ Then a build system could emulate creating `.olean` files directly by autogenera
 What about vocabularies? These seem to justify having a completely new build system, since the `.lean.tex` files seem to need to contain dependency information in order to build vocabularies.
 
 ARGGGHHHHHHHHHHHHHHHH I hate this. The hacky idea I had above does not seem so good anymore... There does not seem to be an easy solution to all my problems... I'll look at this tomorrow again...
+
+### Build instructions
+
+`nix build .#lean -o lean`, then
+
+`LEAN_PATH=objects:lean/lib nix run .#executable`
+
+this seems to work, except that I still need to track down where the `Init` dependency gets stored... If I manage to find that dependency
