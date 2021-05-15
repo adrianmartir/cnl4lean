@@ -41,8 +41,8 @@ The output contains developer tools like
 
 * `vscode-dev`
 * `emacs-dev`
-* `lean-dev` is simply a wrapper around the `lean` executable provided by the flake at `github:leanprover/lean4`
-* `leanpkg-dev` is also looks like just a wrapper around a `leanpkg` executable.
+* `lean-dev` is simply a wrapper around your projects `lean` component.
+* `leanpkg-dev` is a wrapper around you projects `print-paths` component.
 * `lean-bin-dev` is a wrapper around the previous two tools. The lean docs [here](https://leanprover.github.io/lean4/doc/setup.html) recommend using this for manually pointing vscode to the leanpkgs and lean executables, in case the `vscode-dev` or `emacs-dev` components do not satisfy your needs.
 
 Presumably this `lean` executable is simply the `defaultPackage` attribute in lean 4's `flake.nix`. This points to a lean 4's `nix/packages.nix`, which points to `nix/bootstrap.nix`.

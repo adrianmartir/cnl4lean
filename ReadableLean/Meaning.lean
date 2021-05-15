@@ -196,7 +196,7 @@ def Bound.interpret : Bound -> Lean.Expr -> MetaM Proposition
     sgn.interpret (expr bound)
 
 mutual
-  -- Ex: `[Aut(M) is] a simple group $G$ such that the order $G$ is odd.`
+  -- Ex: `[Aut(M) is] a simple group $G$ such that the order of $G$ is odd.`
   -- Returns a map `Expr -> Expr`, `e ↦ p(e)` for a predicate `p`.
   -- The statement at the end interprets to an expression (not dependent on another expression!)
   -- So we abstract abstract the free variable `G` and also make it into a map
