@@ -14,6 +14,7 @@ def nor (p1: Prop) (p2: Prop) : Prop :=
 
 constant Point : Type
 
+@[export does_not_exist]
 def point (x: Point) : Prop := True
 
 constant CongPred (x y z w: Point) : Prop

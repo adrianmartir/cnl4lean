@@ -371,7 +371,7 @@ def Para.interpret : Para -> MetaM Unit
     -- TODO: Name definition by using its pattern
     -- TODO: Think about level parameters
     let defn := mkDefinitionValEx `test [] prop defn ReducibilityHints.opaque DefinitionSafety.safe
-    modifyEnv (fun e => e.add (ConstantInfo.defnInfo defn))
+    addAndCompile (Declaration.defnDecl defn)
 
   | Para.lemma' tag lemma => do
     let lemma <- lemma.interpret
@@ -382,4 +382,5 @@ def Para.interpret : Para -> MetaM Unit
     -- propositions to the envirionment
 
     let lemma := mkDefinitionValEx tag.interpret [] prop lemma ReducibilityHints.«abbrev» DefinitionSafety.safe
-    modifyEnv (fun e => e.add (ConstantInfo.defnInfo lemma))
+
+    addAndCompile (Declaration.defnDecl lemma)

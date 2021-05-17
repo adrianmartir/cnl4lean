@@ -17,6 +17,7 @@
         name = "ReadableLean";  # must match the name of the top-level .lean file
         src = ./.;
         executableName = "rlean";
+        linkFlags = ["-rdynamic"];
       };
     in {
       packages = pkg // {
