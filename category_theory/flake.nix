@@ -9,7 +9,7 @@
     let
       leanPkgs = lean.packages.${system};
       pkg = leanPkgs.buildLeanPackage {
-        name = "category_theory";  # must match the name of the top-level .lean file
+        name = "CategoryTheory";  # must match the name of the top-level .lean file
         src = ./.;
       };
     in {
