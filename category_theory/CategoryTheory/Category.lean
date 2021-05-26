@@ -20,14 +20,6 @@ def hom_struct.opposite (C: hom_struct) : hom_struct := {
 
 notation:1030 arg "ᵒᵖ"  => hom_struct.opposite arg
 
-def hom_struct.op {C: hom_struct} (c: C.obj) : Cᵒᵖ.obj := c
-def hom_struct.unop {C: hom_struct} (c: Cᵒᵖ.obj) : C.obj := c
-
-def hom_struct.opm {C: hom_struct} {c d: C.obj} (f : C.hom c d) : Cᵒᵖ.hom d c := f
-def hom_struct.unopm {C: hom_struct} {c d: Cᵒᵖ.obj} (f : Cᵒᵖ.hom c d) : C.hom d c := f
-
-attribute [simp] hom_struct.op hom_struct.opm hom_struct.unopm hom_struct.unop
-
 -- I guess typeclasses are easily leveraged in CNL by defining something
 -- like an alias `identity -> id'`.
 -- Formalizing this definition in CNL is probably not going to happen in my thesis,
@@ -54,9 +46,8 @@ attribute [simp] category.id_comp category.comp_id category.assoc
 -- `C` and its opposite. This doesn't seem to be possible anymore but I have
 -- to say I didn't like it anyways.
 instance category.opposite (C: hom_struct) [category C]: category Cᵒᵖ := {
-  id' := fun c => hom_struct.opm (id' (hom_struct.unop c))
-  comp := fun f g =>
-      hom_struct.opm (comp (hom_struct.unopm g) (hom_struct.unopm f))
+  id' := fun c => id' (C := C) c
+  comp := fun f g => comp (C := C) g f
   id_comp := by
     intros
     simp
