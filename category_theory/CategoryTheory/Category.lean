@@ -1,9 +1,6 @@
 -- Some basic Category-theoretic constructions
 namespace CategoryTheory
 
-universe u
-universe v
-universe w
 
 -- This notation is optimal, much better than what was in mathlib.
 -- hom sets should always be anotated with the Category they are meant
@@ -58,12 +55,14 @@ theorem opop (C: HomStruct) [Category C]: C = (C.opposite)ᵒᵖ  := by
 
 attribute [simp] opop
 
+universe u
+
 abbrev SmallCategory (C : HomStruct) := Category.{u,u} C
 abbrev LargeCategory (C : HomStruct) := Category.{u+1,u} C
 
 
 def Set : HomStruct := {
-  obj := Type w,
+  obj := Type u,
   hom := fun a b => a -> b
 }
 
@@ -172,7 +171,6 @@ end NatTrans
 
 section Yoneda
 
-variable {C : HomStruct} [Category C]
 
 
 def yObj (c: C.obj) : (Functor Cᵒᵖ Set) := {
@@ -250,13 +248,17 @@ theorem yoneda (c : C.obj) (F: Functor Cᵒᵖ Set) : inverses Set (yonedaMap c 
     rw [p, Functor.map_id]
 ⟩
 
-theorem y_fully_faithful {C: HomStruct} [Category C]: fully_faithful (y (C := C)) := by
+#print yMap
+#print yoneda
+
+theorem y_fully_faithful: fully_faithful (y (C := C)) := by
   simp [fully_faithful]
   intros c d
   have inv: (FunctorCat Cᵒᵖ Set).hom (y.obj c) (y.obj d) -> C.hom c d := yonedaMap c (y.obj d)
-  exact ⟨ inv, by
-    apply yoneda
-  ⟩
+  -- exact ⟨ inv, by
+  --   apply yoneda
+  -- ⟩
+  have p := yoneda c (y.obj d)
 
 
 
