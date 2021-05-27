@@ -8,17 +8,10 @@ universe w
 -- This notation is optimal, much better than what was in mathlib.
 -- hom sets should always be anotated with the Category they are meant
 -- to be taken on. Unlike identities and composition operators and axioms.
--- Otherwise we get into typeclass hell when considering opposite categories.
+-- Otherwise it is very confusing when considering opposite categories.
 structure HomStruct where
   obj : Type u
   hom : obj → obj → Type v
-
-def HomStruct.opposite (C: HomStruct) : HomStruct := {
-  obj := C.obj
-  hom := fun f g => C.hom g f
-}
-
-notation:1030 arg "ᵒᵖ"  => HomStruct.opposite arg
 
 
 class Category (C : HomStruct) where
@@ -36,6 +29,13 @@ open Category
 
 attribute [simp] Category.id_comp Category.comp_id Category.assoc
 
+
+def HomStruct.opposite (C: HomStruct) : HomStruct := {
+  obj := C.obj
+  hom := fun f g => C.hom g f
+}
+
+notation:1030 arg "ᵒᵖ"  => HomStruct.opposite arg
 
 instance Category.opposite (C: HomStruct) [Category C]: Category Cᵒᵖ := {
   id' := fun c => id' (C := C) c
@@ -61,8 +61,7 @@ attribute [simp] opop
 abbrev SmallCategory (C : HomStruct) := Category.{u,u} C
 abbrev LargeCategory (C : HomStruct) := Category.{u+1,u} C
 
--- It looks a bit odd defining this separately, but it's what you would expect.
--- After all, it is then clear whether you mean `Set` or `Setᵒᵖ`.
+
 def Set : HomStruct := {
   obj := Type w,
   hom := fun a b => a -> b
@@ -95,12 +94,27 @@ structure Functor (C D: HomStruct) [Category C] [Category D] where
 
 attribute [simp] Functor.map_id Functor.map_comp
 
-def faithful {C D: HomStruct} [Category C] [Category D] (F: Functor C D) :=
-  forall {c d: C.obj} (f g: C.hom c d) (q: F.map f = F.map g), f = g
 
-def full {C D: HomStruct} [Category C] [Category D] (F: Functor C D) :=
-  forall {c d: C.obj} (f: D.hom (F.obj c) (F.obj d)),
-    exists g : C.hom c d, F.map g = f
+-- def faithful {C D: HomStruct} [Category C] [Category D] (F: Functor C D) :=
+--   forall {c d: C.obj} (f g: C.hom c d) (q: F.map f = F.map g), f = g
+
+-- def full {C D: HomStruct} [Category C] [Category D] (F: Functor C D) :=
+--   forall {c d: C.obj} (f: D.hom (F.obj c) (F.obj d)),
+--     exists g : C.hom c d, F.map g = f
+
+def fully_faithful {C D: HomStruct} [Category C] [Category D] (F: Functor C D) :=
+  forall c d : C.obj, isomorphism Set (F.map (c := c) (d := d))
+
+-- theorem faithful_and_full_iff_fully_faithful {C D: HomStruct} [Category C] [Category D] (F: Functor C D) : faithful F ∧ full F <-> fully_faithful F := ⟨
+--   by
+--     simp [faithful, full, fully_faithful, isomorphism]
+--     intro ⟨p_faithful, p_full⟩ c d
+--     have p_faithful := p_faithful (c := c) (d := d)
+--     have p_full := p_full (c := c) (d := d)
+--     ,
+--   by
+--     simp
+-- ⟩
 
 section NatTrans
 
@@ -247,9 +261,15 @@ theorem yoneda (c : C.obj) (F: Functor Cᵒᵖ Set) : inverses Set (yonedaMap c 
     rw [p, Functor.map_id]
 ⟩
 
+theorem y_fully_faithful {C: HomStruct} [Category C]: fully_faithful (y (C := C)) := by
+  simp [fully_faithful, isomorphism]
+  intros c d
+
 -- Redo part of Riehl's universal properties chapter as an 'application' of the Yoneda lemma.
 -- Motto: The functor category has many good properties, and we can use it to characterize arrows into a fictional object. Then we can decide whether it exists.
 
 end Yoneda
+
+-- We can start limits and colimits here..
 
 end CategoryTheory
