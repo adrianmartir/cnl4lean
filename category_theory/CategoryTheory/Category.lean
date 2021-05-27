@@ -95,26 +95,8 @@ structure Functor (C D: HomStruct) [Category C] [Category D] where
 attribute [simp] Functor.map_id Functor.map_comp
 
 
--- def faithful {C D: HomStruct} [Category C] [Category D] (F: Functor C D) :=
---   forall {c d: C.obj} (f g: C.hom c d) (q: F.map f = F.map g), f = g
-
--- def full {C D: HomStruct} [Category C] [Category D] (F: Functor C D) :=
---   forall {c d: C.obj} (f: D.hom (F.obj c) (F.obj d)),
---     exists g : C.hom c d, F.map g = f
-
 def fully_faithful {C D: HomStruct} [Category C] [Category D] (F: Functor C D) :=
   forall c d : C.obj, isomorphism Set (F.map (c := c) (d := d))
-
--- theorem faithful_and_full_iff_fully_faithful {C D: HomStruct} [Category C] [Category D] (F: Functor C D) : faithful F ∧ full F <-> fully_faithful F := ⟨
---   by
---     simp [faithful, full, fully_faithful, isomorphism]
---     intro ⟨p_faithful, p_full⟩ c d
---     have p_faithful := p_faithful (c := c) (d := d)
---     have p_full := p_full (c := c) (d := d)
---     ,
---   by
---     simp
--- ⟩
 
 section NatTrans
 
