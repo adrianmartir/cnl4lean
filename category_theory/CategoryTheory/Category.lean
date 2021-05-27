@@ -55,6 +55,8 @@ theorem opop (C: HomStruct) [Category C]: C = (C.opposite)ᵒᵖ  := by
 
 attribute [simp] opop
 
+section Set
+
 universe u
 
 abbrev SmallCategory (C : HomStruct) := Category.{u,u} C
@@ -79,6 +81,8 @@ instance Set.Category : LargeCategory Set :=
     intros
     simp [comp]
 }
+
+end Set
 
 def inverses (C: HomStruct) [Category C] {c d: C.obj} (f: C.hom c d) (g: C.hom d c) := g ∘ f = id' c ∧ f ∘ g = id' d
 
@@ -171,9 +175,13 @@ end NatTrans
 
 section Yoneda
 
+universes u v
 
 
-def yObj (c: C.obj) : (Functor Cᵒᵖ Set) := {
+variable {C : HomStruct.{u,v}} [Category C]
+
+
+def yObj (c: C.obj) : (Functor Cᵒᵖ Set.{v}) := {
     obj := fun d => C.hom d c
     -- f gets sent to precomposition with f
     map := fun f g => g ∘ f
@@ -209,9 +217,9 @@ def y : Functor C (FunctorCat Cᵒᵖ Set) := {
 
 -- At this point I should talk about representability and give a few examples - It should be emphazised how important that concept is
 
-def yonedaMap (c : C.obj) (F: Functor Cᵒᵖ Set) (η: NatTrans (y.obj c) F) : F.obj c := η.app c (id' c)
+def yonedaMap (c : C.obj) (F: Functor Cᵒᵖ Set.{v}) (η: NatTrans (y.obj c) F) : F.obj c := η.app c (id' c)
 
-def yonedaMapInv (c : C.obj) (F: Functor Cᵒᵖ Set) (x: F.obj c) : NatTrans (y.obj c) F := {
+def yonedaMapInv (c : C.obj) (F: Functor Cᵒᵖ Set.{v}) (x: F.obj c) : NatTrans (y.obj c) F := {
   app := fun d f => F.map f x
   naturality := by
     intros d e f
@@ -225,7 +233,14 @@ def yonedaMapInv (c : C.obj) (F: Functor Cᵒᵖ Set) (x: F.obj c) : NatTrans (y
     simp [comp]
 }
 
-theorem yoneda (c : C.obj) (F: Functor Cᵒᵖ Set) : inverses Set (yonedaMap c F) (yonedaMapInv c F) := ⟨
+
+-- Ahh, now I get it. This doesn't work because we don't have cumulative universes and the objects between which we are taking the maps are not exactly one universe below the morphism
+theorem yoneda (c : C.obj) (F: Functor Cᵒᵖ Set.{v}) : inverses Set (yonedaMap c F) (by
+    simp [Set]
+    exact (yonedaMapInv c F)
+    )
+
+     := ⟨
   by
     simp [yonedaMap, yonedaMapInv]
     apply funext
@@ -248,8 +263,6 @@ theorem yoneda (c : C.obj) (F: Functor Cᵒᵖ Set) : inverses Set (yonedaMap c 
     rw [p, Functor.map_id]
 ⟩
 
-#print yMap
-#print yoneda
 
 theorem y_fully_faithful: fully_faithful (y (C := C)) := by
   simp [fully_faithful]
@@ -258,7 +271,7 @@ theorem y_fully_faithful: fully_faithful (y (C := C)) := by
   -- exact ⟨ inv, by
   --   apply yoneda
   -- ⟩
-  have p := yoneda c (y.obj d)
+  have p := yoneda (C := C)
 
 
 
