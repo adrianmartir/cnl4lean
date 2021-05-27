@@ -83,6 +83,13 @@ instance Set.Category : LargeCategory Set :=
 
 def inverses (C: HomStruct) [Category C] {c d: C.obj} (f: C.hom c d) (g: C.hom d c) := g ∘ f = id' c ∧ f ∘ g = id' d
 
+theorem inverse_unique (C: HomStruct) [Category C] {c d: C.obj} (f: C.hom c d) (g h: C.hom d c) : inverses C f g ∧ inverses C f h -> g = h := by
+  intro ⟨⟨_,p⟩,⟨q,_⟩⟩
+  have r : (h ∘ f) ∘ g = h := by
+    rw [<- assoc, p, id_comp]
+
+  rw [<- r, q, comp_id]
+
 def isomorphism (C: HomStruct) [Category C] {c d: C.obj} (f: C.hom c d) :=
   exists (g: C.hom d c), inverses C f g
 
@@ -244,8 +251,14 @@ theorem yoneda (c : C.obj) (F: Functor Cᵒᵖ Set) : inverses Set (yonedaMap c 
 ⟩
 
 theorem y_fully_faithful {C: HomStruct} [Category C]: fully_faithful (y (C := C)) := by
-  simp [fully_faithful, isomorphism]
+  simp [fully_faithful]
   intros c d
+  have inv: (FunctorCat Cᵒᵖ Set).hom (y.obj c) (y.obj d) -> C.hom c d := yonedaMap c (y.obj d)
+  exact ⟨ inv, by
+    apply yoneda
+  ⟩
+
+
 
 -- Redo part of Riehl's universal properties chapter as an 'application' of the Yoneda lemma.
 -- Motto: The functor category has many good properties, and we can use it to characterize arrows into a fictional object. Then we can decide whether it exists.
