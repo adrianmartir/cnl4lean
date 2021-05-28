@@ -96,6 +96,30 @@ theorem inverse_unique (C: HomStruct) [Category C] {c d: C.obj} (f: C.hom c d) (
 def isomorphism (C: HomStruct) [Category C] {c d: C.obj} (f: C.hom c d) :=
   exists (g: C.hom d c), inverses C f g
 
+namespace Function
+
+variable {A: Type _} {B: Type _}
+
+def inverses (f: A -> B) (g: B -> A) :=
+  (Function.comp g f = id) ∧ (Function.comp f g  = id)
+
+theorem inverses_sym (f: A -> B) (g: B -> A) : inverses f g <-> inverses g f := by
+  simp [inverses]
+  exact ⟨
+    by
+      intro ⟨p,q⟩
+      exact ⟨q,p⟩,
+    by
+      intro ⟨p,q⟩
+      exact ⟨q,p⟩
+  ⟩
+
+
+def isomorphism (f: A -> B) :=
+  exists (g: B -> A), inverses f g
+
+end Function
+
 structure Functor (C D: HomStruct) [Category C] [Category D] where
   obj : C.obj -> D.obj
   map : {c d : C.obj} -> C.hom c d -> D.hom (obj c) (obj d)
@@ -105,8 +129,8 @@ structure Functor (C D: HomStruct) [Category C] [Category D] where
 attribute [simp] Functor.map_id Functor.map_comp
 
 
-def fully_faithful {C D: HomStruct} [Category C] [Category D] (F: Functor C D) :=
-  forall c d : C.obj, isomorphism Set (F.map (c := c) (d := d))
+def fully_faithful {C: HomStruct} [Category C] {D: HomStruct} [Category D] (F: Functor C D) :=
+  forall c d : C.obj, Function.isomorphism (F.map (c := c) (d := d))
 
 section NatTrans
 
@@ -235,12 +259,7 @@ def yonedaMapInv (c : C.obj) (F: Functor Cᵒᵖ Set.{v}) (x: F.obj c) : NatTran
 
 
 -- Ahh, now I get it. This doesn't work because we don't have cumulative universes and the objects between which we are taking the maps are not exactly one universe below the morphism
-theorem yoneda (c : C.obj) (F: Functor Cᵒᵖ Set.{v}) : inverses Set (yonedaMap c F) (by
-    simp [Set]
-    exact (yonedaMapInv c F)
-    )
-
-     := ⟨
+theorem yoneda (c : C.obj) (F: Functor Cᵒᵖ Set.{v}) : Function.inverses (yonedaMap c F) (yonedaMapInv c F) := ⟨
   by
     simp [yonedaMap, yonedaMapInv]
     apply funext
@@ -256,22 +275,32 @@ theorem yoneda (c : C.obj) (F: Functor Cᵒᵖ Set.{v}) : inverses Set (yonedaMa
     rw [p, <- nat f]
     simp [y, yObj, comp],
   by
-    simp [yonedaMap, yonedaMapInv,comp]
+    simp [yonedaMap, yonedaMapInv, Function.comp]
     apply funext
     intro x
     have p: id' (C := C) c = id' (C := Cᵒᵖ) c  := Eq.refl _
     rw [p, Functor.map_id]
+    simp [id']
 ⟩
 
 
 theorem y_fully_faithful: fully_faithful (y (C := C)) := by
-  simp [fully_faithful]
+  simp [fully_faithful, Function.isomorphism]
   intros c d
-  have inv: (FunctorCat Cᵒᵖ Set).hom (y.obj c) (y.obj d) -> C.hom c d := yonedaMap c (y.obj d)
-  -- exact ⟨ inv, by
-  --   apply yoneda
-  -- ⟩
-  have p := yoneda (C := C)
+
+  -- The crucial insight is that `y.map` is in fact equal to `yonedaMapInverse` and thus by the yoneda lemma has an inverse
+  have yoneda := yoneda c (y.obj d)
+
+  exact ⟨ yonedaMap c (y.obj d), by
+    have p: yonedaMapInv c (Functor.obj y d) = y.map := by
+      apply funext
+      intro f
+      apply nat_ext
+      simp [yonedaMapInv, y, yMap, yObj]
+
+    rw [<- p, Function.inverses_sym]
+    exact yoneda
+  ⟩
 
 
 
