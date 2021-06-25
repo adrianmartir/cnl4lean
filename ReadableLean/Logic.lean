@@ -10,7 +10,10 @@ open Lean.Meta
 /- We use our own proposition type in order to be able to use our own
 implementation of `True` that gets automatically reduced when applying
 logical operators. This is absolutely essential for the generated
-lemmata to be readable -/
+lemmata to be readable.
+It is currently unclear to me whether I should use this proposition type
+or directly pattern match on expressions to see whether they already are
+equal to true. -/
 inductive Proposition where
   | expr: Lean.Expr -> Proposition
   | top: Proposition

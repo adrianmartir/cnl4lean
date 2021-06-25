@@ -2,9 +2,7 @@
 import ReadableLean.Grammar
 import ReadableLean.Logic
 import Lean
--- The goal is to create a dummy file and to write all the natural constructs to it.
--- Then, can I somehow make the environment into an `.olean` file? I am not sure how
--- this would work.
+
 
 namespace ReadableLean
 
@@ -12,10 +10,12 @@ open Lean hiding Expr
 open Lean.Meta
 open Proposition
 
--- In this module I use the `MetaM` monad as a logic framework that exposes leans
--- internals. I decided against using the `TermElabM` monad, because it contains many
--- lean-specific mechanisms, like macro expansion and debugging. Most of the instances
--- for `TermElabM` contain lean-specific `Syntax` objects or macro stuff.
+-- Here we use the `MetaM` monad in order to translate our CNL to lean expressions.
+
+-- We are not using the `TermElabM` monad, because it contains many lean-specific mechanisms,
+-- like macro expansion and debugging. But I can imagine using the `TermElabM` monad in
+-- order to do things like typeclass instantiation and implicit arguments and then immediately
+-- run `TermElabM` in order to get a function valued in `MetaM`
 
 
 def Pattern.interpret (pat : Pattern) : MetaM Name :=
@@ -358,7 +358,7 @@ def Tag.interpret : Tag -> Name
     |> Name.mkSimple
 
 -- This should yield an environment of declarations.
--- def interpretPara (p: Para) : MetaM Unit := sorry
+
 -- If I run into problems at some point(since I can't say I understand
 -- reducibility hints or the different `ConstantInfo` constructors),
 -- I can read the source of `Elab/PreDefinition/Main.lean`.
@@ -366,21 +366,18 @@ def Para.interpret : Para -> MetaM Unit
   | Para.defn' defn => do
     let defn <- defn.interpret
     -- TODO: Do this properly
-    let prop <- inferType defn
+    let type <- inferType defn
 
     -- TODO: Name definition by using its pattern
     -- TODO: Think about level parameters
-    let defn := mkDefinitionValEx `test [] prop defn ReducibilityHints.opaque DefinitionSafety.safe
+    let defn := mkDefinitionValEx `test [] type defn ReducibilityHints.opaque DefinitionSafety.safe
     addAndCompile (Declaration.defnDecl defn)
 
   | Para.lemma' tag lemma => do
     let lemma <- lemma.interpret
     let lemma := lemma.run
-    -- This should always be a proposition
-    let prop <- inferType lemma
-    -- Lemmas are propositions, so we can simply add them as
-    -- propositions to the envirionment
 
-    let lemma := mkDefinitionValEx tag.interpret [] prop lemma ReducibilityHints.«abbrev» DefinitionSafety.safe
-
-    addAndCompile (Declaration.defnDecl lemma)
+    -- We compile lemmas to axioms, since we don't know whether we will later need the
+    -- proof term in another lemma/definition.
+    let lemma := mkAxiomValEx tag.interpret [] lemma False
+    addAndCompile (Declaration.axiomDecl lemma)

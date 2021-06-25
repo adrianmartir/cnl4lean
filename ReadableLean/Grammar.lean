@@ -3,7 +3,7 @@ namespace ReadableLean
 
 -- In order to make deserialization more streamlined painless, we disregard
 -- lean naming conventions and use the Haskell naming conventions
--- and mimic Haskell behaviour by using export declaration. (This is WIP)
+-- and mimic Haskell behaviour by using export declarations. (This is WIP)
 -- This should enable light deserialization automation in the future
 
 inductive Delim where

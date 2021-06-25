@@ -1,6 +1,9 @@
 
 -- This file contains the builtin lean constants.
--- Somehow disable prelude when reading this?
+-- This file needs to be manually compiled with
+-- `res-lean-dev/bin/lean examples/Prelude.lean -o objects/Prelude.olean`,
+-- where the `res-lean-dev` symlink can be created by
+-- `nix build .#lean-dev -o res-lean-dev/`
 
 def xor (p1: Prop) (p2: Prop) : Prop :=
   Or (And p1 (Not p2))
@@ -14,7 +17,6 @@ def nor (p1: Prop) (p2: Prop) : Prop :=
 
 constant Point : Type
 
-@[export does_not_exist]
 def point (x: Point) : Prop := True
 
 constant CongPred (x y z w: Point) : Prop
