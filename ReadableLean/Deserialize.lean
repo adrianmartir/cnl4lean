@@ -79,7 +79,7 @@ where
   getInductiveArgs? (json : Lean.Json) : Option (String × Lean.Json) := do
     let tag <- json.getObjVal? "tag"
     let tag <- tag.getStr?
-    let contents <- json.getObjVal? "contents"
+    let contents <- json.getObjValD "contents"
     (tag, contents)
 
 
@@ -285,7 +285,7 @@ mutual
         <$> Quantifier.fromJson quantifier
         <*> varSymbs.mapM VarSymbol.fromJson
         <*> Bound.fromJson bound
-        <*> fromJsonStmt suchThat
+        <*> fromJson? fromJsonStmt suchThat
         <*> fromJsonStmt stmt
     | _ => throwUnexpected "statement" json
 end

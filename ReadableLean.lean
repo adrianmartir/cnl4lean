@@ -22,7 +22,7 @@ def fromFile (filename: String) : DeserializeM Para := do
     | Except.error msg => throw (parsingError msg)
 
 def main (args : List String): IO Unit := do
-  let p <- fromFile "paraLemma.json" |>.run
+  let p <- fromFile "refl.json" |>.run
   match p with
     | Except.error e => panic! (toString e)
     | Except.ok p =>
@@ -32,7 +32,7 @@ def main (args : List String): IO Unit := do
 
       let op : MetaM Lean.Expr := do
         p.interpret
-        let ns <- resolveGlobalConstNoOverload `TransitivityOfCongruence
+        let ns <- resolveGlobalConstNoOverload `ReflexivityOfCongruence
         inferType (mkConst ns)
 
       let (expr, _, _) <- op.toIO { openDecls := [OpenDecl.simple `Prelude []] } { env := env }

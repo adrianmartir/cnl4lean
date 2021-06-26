@@ -59,10 +59,6 @@ partial def Expr.interpret : Expr -> MetaM Lean.Expr
     let args <- args.mapM (fun e => e.interpret)
     appN (<- symb.interpret) args
   | app _ _ => throwError "app not implemented yet"
-    -- We want a dumbed-down application here(no implicits).
-    -- Typeclasses should be merely a **notational** construct - which in
-    -- CNL has gets handled in *patterns*. This should be only for doing
-    -- higher order logic.
   | _ => throwError "const not implemented yet"
 
 def Sign.interpret : Sign -> Proposition -> MetaM Proposition
